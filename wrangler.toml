@@ -7,7 +7,7 @@ compatibility_date = "2025-06-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "browserless-monitor"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "5abf1f0b-39c2-4021-82b7-4c2d848507da"
 
 # Secrets (do NOT put real values here — use `.dev.vars` locally and
 # `wrangler pages secret put <NAME>` for production):

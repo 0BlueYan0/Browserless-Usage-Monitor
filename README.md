@@ -67,8 +67,39 @@ npm run build     # 正式建置 + 產生 PWA service worker
 1. 登入 <https://dash.cloudflare.com>。
 2. 左側 **Storage & Databases → D1 SQL Database**(或 Workers & Pages → D1)→ **Create**。
 3. 名稱填 `browserless-monitor` → **Create**。
-4. 進入該資料庫 → **Console** 分頁 → 把 `migrations/0001_init.sql` 全部內容貼上 → **Execute**。
+4. 進入該資料庫 → **Console** 分頁 → 貼上下面這段(**不含註解**的版本,Console 對註解/多句較敏感)→ **Execute**:
+   ```sql
+   CREATE TABLE IF NOT EXISTS tokens (
+     id TEXT PRIMARY KEY,
+     label TEXT NOT NULL,
+     source TEXT NOT NULL DEFAULT 'cloud',
+     endpoint_url TEXT,
+     api_token_enc TEXT NOT NULL,
+     account_enc TEXT,
+     plan_limit INTEGER NOT NULL,
+     reset_day INTEGER NOT NULL DEFAULT 1,
+     sort_order INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS snapshots (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     token_id TEXT NOT NULL REFERENCES tokens(id) ON DELETE CASCADE,
+     captured_at INTEGER NOT NULL,
+     period_start INTEGER NOT NULL,
+     total_units REAL NOT NULL,
+     time_units REAL,
+     proxy_units REAL,
+     captcha_units REAL,
+     raw_json TEXT
+   );
+   CREATE INDEX IF NOT EXISTS idx_snap_token_time ON snapshots (token_id, captured_at);
+   CREATE INDEX IF NOT EXISTS idx_snap_token_period ON snapshots (token_id, period_start);
+   ```
    應看到建立 `tokens`、`snapshots` 兩張表成功。
+   - 若回 `Requests without any query are not supported`(空查詢):把上面 4 個 statement 分開、一句一句 Execute。
+   - 或改用 CLI(最保險):`wrangler login` 後執行
+     `wrangler d1 execute browserless-monitor --remote --file=migrations/0001_init.sql`。
 5. 在資料庫頁面複製 **Database ID**。
 6. 把這個 ID 填進 repo 裡 `wrangler.toml` 與 `worker/wrangler.toml` 兩個檔的 `database_id`,
    然後 commit + push(Database ID 不是機密)。

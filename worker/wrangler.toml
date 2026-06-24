@@ -12,7 +12,7 @@ crons = ["0 */6 * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "browserless-monitor"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "5abf1f0b-39c2-4021-82b7-4c2d848507da"
 
 # Secret needed to decrypt stored tokens:
 #   wrangler secret put ENCRYPTION_KEY -c worker/wrangler.toml
