@@ -129,3 +129,49 @@ export async function getRecentSnapshots(
     .all<{ captured_at: number; total_units: number }>()
   return (results ?? []).map((r) => ({ capturedAt: r.captured_at, totalUnits: r.total_units }))
 }
+
+export interface DailyBucketInput {
+  dayStart: number
+  units: number
+  successful: number
+  proxy: number
+  captcha: number
+  seconds: number
+}
+
+/** Upsert one day's usage bucket (latest read wins for that day). */
+export async function upsertDailyUsage(
+  db: D1Database,
+  tokenId: string,
+  b: DailyBucketInput,
+  now: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO daily_usage (token_id, day_start, units, successful, proxy, captcha, seconds, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(token_id, day_start) DO UPDATE SET
+         units = excluded.units,
+         successful = excluded.successful,
+         proxy = excluded.proxy,
+         captcha = excluded.captcha,
+         seconds = excluded.seconds,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(tokenId, b.dayStart, b.units, b.successful, b.proxy, b.captcha, b.seconds, now)
+    .run()
+}
+
+export async function getDailyUsage(
+  db: D1Database,
+  tokenId: string,
+  sinceMs: number,
+): Promise<Array<{ dayStart: number; units: number }>> {
+  const { results } = await db
+    .prepare(
+      'SELECT day_start, units FROM daily_usage WHERE token_id = ? AND day_start >= ? ORDER BY day_start',
+    )
+    .bind(tokenId, sinceMs)
+    .all<{ day_start: number; units: number }>()
+  return (results ?? []).map((r) => ({ dayStart: r.day_start, units: r.units }))
+}

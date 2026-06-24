@@ -1,42 +1,37 @@
-// Browserless.io usage clients. Two paths:
-//   - cloud: GraphQL exportMetrics at api.browserless.io/graphql
-//   - self-hosted: GET {endpoint}/metrics/total
+// Browserless.io usage client.
 //
-// NOTE: the exact GraphQL shape (arg/type names) and whether the API token alone
-// is accepted (vs. needing an account login authToken) is uncertain from the
-// public docs. This module is the single place to adjust once verified against a
-// real token (see milestone "資料來源驗證" in the plan). The token-only path is
-// attempted first; on failure we fall back to the account-login flow if creds
-// were provided, otherwise we surface NeedsLoginError.
+// Verified against the live API (2026-06): the dashboard reads usage via
+//   accountUsage(apiToken, timeframe) { aggregatedData { date units ... } summary { units } }
+// at https://api.browserless.io/graphql, and it works with the API TOKEN ALONE
+// (no account login / Bearer needed). `timeframe` only accepts hour | day | week,
+// so for the monthly billing total we accumulate the per-day buckets ourselves.
+import type { DailyBucket } from './types'
 
 const GRAPHQL_ENDPOINT = 'https://api.browserless.io/graphql'
+const DAY_MS = 24 * 60 * 60 * 1000
 
-export interface AccountLogin {
-  email: string
-  password: string
-}
-
-export interface RawUsage {
-  totalUnitsUsed: number
-  timeUnits: number | null
-  proxyUnits: number | null
-  captchaUnits: number | null
+export interface AccountUsage {
+  /** Per-day buckets (UTC day start), most recent ~8 days. */
+  daily: DailyBucket[]
+  /** Total units over the trailing week (from the API summary). */
+  weekUnits: number
   fetchedAt: number
 }
 
-export class NeedsLoginError extends Error {
-  constructor(message = 'This token needs an account login to read usage.') {
-    super(message)
-    this.name = 'NeedsLoginError'
+const ACCOUNT_USAGE_QUERY = `query AccountUsage($apiToken: String!, $timeframe: timeframe!) {
+  accountUsage(apiToken: $apiToken, timeframe: $timeframe) {
+    aggregatedData { date units successful proxy captcha seconds }
+    summary { units }
   }
-}
+}`
 
-interface ExportMetricsRow {
-  date: string
-  totalUnitsUsed: number
-  timeUnits: number
-  proxyUnits: number
-  captchaUnits: number
+interface AggRow {
+  date: number
+  units: number
+  successful: number
+  proxy: number
+  captcha: number
+  seconds: number
 }
 
 interface GraphQLResponse<T> {
@@ -44,26 +39,7 @@ interface GraphQLResponse<T> {
   errors?: Array<{ message: string }>
 }
 
-const EXPORT_METRICS_QUERY = `
-query ExportMetrics($apiToken: String!, $authToken: String, $timeslot: timeslot) {
-  exportMetrics(apiToken: $apiToken, authToken: $authToken, timeslot: $timeslot) {
-    date
-    totalUnitsUsed
-    timeUnits
-    proxyUnits
-    captchaUnits
-  }
-}`
-
-const LOGIN_MUTATION = `
-mutation Login($email: String!, $password: String!) {
-  login(email: $email, password: $password) {
-    authToken
-    needsSecondFactor
-  }
-}`
-
-async function gqlRequest<T>(query: string, variables: object): Promise<T> {
+async function gql<T>(query: string, variables: object): Promise<T> {
   const res = await fetch(GRAPHQL_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -78,85 +54,42 @@ async function gqlRequest<T>(query: string, variables: object): Promise<T> {
   return json.data
 }
 
-async function login(account: AccountLogin): Promise<string> {
-  const data = await gqlRequest<{ login: { authToken: string; needsSecondFactor: boolean } }>(
-    LOGIN_MUTATION,
-    account,
-  )
-  if (data.login.needsSecondFactor) {
-    // 2FA accounts can't be used with stored email/password alone.
-    throw new NeedsLoginError('This account has 2FA enabled, which is not supported for stored login.')
-  }
-  return data.login.authToken
-}
-
-function pickCurrentRow(rows: ExportMetricsRow[], now: number): ExportMetricsRow | null {
-  if (!rows.length) return null
-  const d = new Date(now)
-  const ym = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
-  const match = rows.find((r) => typeof r.date === 'string' && r.date.startsWith(ym))
-  return match ?? rows[rows.length - 1]
-}
-
-function rowToUsage(row: ExportMetricsRow | null, fetchedAt: number): RawUsage {
+function toBucket(r: AggRow): DailyBucket {
   return {
-    totalUnitsUsed: row?.totalUnitsUsed ?? 0,
-    timeUnits: row?.timeUnits ?? null,
-    proxyUnits: row?.proxyUnits ?? null,
-    captchaUnits: row?.captchaUnits ?? null,
-    fetchedAt,
+    // The API timestamps each daily bucket at the day's *end* (next UTC midnight),
+    // e.g. the 24th's usage is dated the 25th. Shift back so dayStart is the day itself.
+    dayStart: Math.floor(r.date / DAY_MS) * DAY_MS - DAY_MS,
+    units: r.units ?? 0,
+    successful: r.successful ?? 0,
+    proxy: r.proxy ?? 0,
+    captcha: r.captcha ?? 0,
+    seconds: r.seconds ?? 0,
   }
 }
 
-async function queryExportMetrics(apiToken: string, authToken: string | undefined): Promise<ExportMetricsRow[]> {
-  const data = await gqlRequest<{ exportMetrics: ExportMetricsRow[] }>(EXPORT_METRICS_QUERY, {
-    apiToken,
-    authToken,
-    timeslot: 'month',
-  })
-  return data.exportMetrics ?? []
-}
-
-export async function fetchCloudUsage(apiToken: string, account?: AccountLogin): Promise<RawUsage> {
-  const now = Date.now()
-  try {
-    const rows = await queryExportMetrics(apiToken, undefined)
-    return rowToUsage(pickCurrentRow(rows, now), now)
-  } catch (tokenOnlyError) {
-    if (!account) {
-      throw new NeedsLoginError(
-        `Token-only usage query failed (${(tokenOnlyError as Error).message}). Add account login for this token.`,
-      )
-    }
-    const authToken = await login(account)
-    const rows = await queryExportMetrics(apiToken, authToken)
-    return rowToUsage(pickCurrentRow(rows, now), now)
-  }
-}
-
-export async function fetchSelfHostedUsage(endpoint: string, token: string): Promise<RawUsage> {
-  const base = endpoint.replace(/\/+$/, '')
-  const url = `${base}/metrics/total?token=${encodeURIComponent(token)}`
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`metrics/total HTTP ${res.status}`)
-  const json = (await res.json()) as unknown
-  const units = extractUnits(json)
+export async function fetchCloudUsage(apiToken: string): Promise<AccountUsage> {
+  const data = await gql<{
+    accountUsage: { aggregatedData: AggRow[] | null; summary: { units: number } | null }
+  }>(ACCOUNT_USAGE_QUERY, { apiToken, timeframe: 'week' })
+  const au = data.accountUsage
   return {
-    totalUnitsUsed: units,
-    timeUnits: null,
-    proxyUnits: null,
-    captchaUnits: null,
+    daily: (au.aggregatedData ?? []).map(toBucket),
+    weekUnits: au.summary?.units ?? 0,
     fetchedAt: Date.now(),
   }
 }
 
-function extractUnits(json: unknown): number {
-  if (json && typeof json === 'object' && 'units' in json) {
-    const u = (json as { units: unknown }).units
-    if (typeof u === 'number') return u
+export async function fetchSelfHostedUsage(endpoint: string, token: string): Promise<AccountUsage> {
+  const base = endpoint.replace(/\/+$/, '')
+  const res = await fetch(`${base}/metrics/total?token=${encodeURIComponent(token)}`)
+  if (!res.ok) throw new Error(`metrics/total HTTP ${res.status}`)
+  const json = (await res.json()) as { units?: unknown }
+  const units = typeof json.units === 'number' ? json.units : 0
+  const today = Math.floor(Date.now() / DAY_MS) * DAY_MS
+  // Self-hosted /metrics/total is an aggregate, not a daily series; record it as today's bucket.
+  return {
+    daily: [{ dayStart: today, units, successful: 0, proxy: 0, captcha: 0, seconds: 0 }],
+    weekUnits: units,
+    fetchedAt: Date.now(),
   }
-  if (Array.isArray(json)) {
-    return json.reduce((sum: number, r) => sum + (typeof r?.units === 'number' ? r.units : 0), 0)
-  }
-  return 0
 }

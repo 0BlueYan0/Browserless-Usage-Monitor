@@ -58,7 +58,7 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
       <div className="mt-4">
         <UsageBar percent={percent} projectedPercent={projectedPercent} health={health} />
         <div className="mt-2 flex justify-between font-mono text-xs tnum text-muted">
-          <span>{usage ? fmtUnits(usage.totalUnitsUsed) : '—'}</span>
+          <span>{usage ? fmtUnits(usage.usedThisPeriod) : '—'}</span>
           <span>{fmtUnits(token.planLimit)} u</span>
         </div>
       </div>
@@ -102,8 +102,9 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
       )}
 
       {usage && (
-        <div className="mt-3 text-right font-mono text-[0.6rem] uppercase tracking-wider text-faint">
-          synced {relTime(usage.fetchedAt)}
+        <div className="mt-3 flex justify-between font-mono text-[0.6rem] uppercase tracking-wider text-faint">
+          <span>7d · {fmtUnits(usage.weekUnits)} u</span>
+          <span>synced {relTime(usage.fetchedAt)}</span>
         </div>
       )}
     </div>

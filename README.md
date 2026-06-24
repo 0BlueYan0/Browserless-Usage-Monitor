@@ -8,27 +8,29 @@
 - **前端**:React + Vite + Tailwind v4 + TanStack Query
 - **API**:Hono on Pages Functions(`/api/*`)
 - **儲存**:Cloudflare D1(token 以 AES-GCM 加密存放)
-- **趨勢資料**:獨立的排程 Worker 定期把用量快照寫入同一個 D1
+- **趨勢資料**:獨立的排程 Worker 定期把每日用量寫入同一個 D1
 - **認證**:單一密碼登入 + 簽章(HMAC)session cookie
 
 ## 用量怎麼讀取
 
-雲端 token 透過 browserless 的 GraphQL `exportMetrics` 查詢讀取
-(`https://api.browserless.io/graphql`)。App 會**先嘗試只帶 token**。
+雲端 token 透過 browserless 的 GraphQL **`accountUsage(apiToken, timeframe)`** 查詢讀取
+(`https://api.browserless.io/graphql`)。
 
-> **2026-06-24 實測:** 只帶 token 會被回 _"An authentication token is required"_ —
-> 因此實務上每個雲端 token 還需要一組**帳號登入**(email/密碼),由 `login` mutation
-> 換成 `authToken`。請在 Tokens 頁面為各 token 補上(不支援 2FA 帳號)。
-> 自架(self-hosted)fleet 改用 `GET {endpoint}/metrics/total`,只需要 token。
+> **2026-06 實測:** 這個查詢**只需要 API token**(不需要帳號登入 / Bearer)。
+> `timeframe` 只接受 `hour` / `day` / `week`,**沒有月份**;`week` 會回傳最近數天的
+> **每日用量桶**。因此本 app 會把每日桶**累積**進 D1(`daily_usage`,逐日 upsert),
+> 再依帳期重置日把當期的每日量加總,得到「本期已用量」。
+> 自架(self-hosted)fleet 改用 `GET {endpoint}/metrics/total`。
 
-方案額度上限(Free 1k / Starter 5k / Scale 25k)**不會**由 API 回傳,
+注意:因為 API 只回最近一週,**第一個帳期可能少算**(加 token 之前 / 開始監控之前的日子拿不到);
+從第二個週期起就完整。方案額度上限(Free 1k / Starter 5k / Scale 25k)**不會**由 API 回傳,
 所以每個 token 的每月 unit 額度需要**手動設定**。
 
 ## 可用天數估算
 
-- **線性**(立即可用):`已用量 / 帳期內已過天數`。
-- **燃燒率**(有快照後優先採用):用排程 Worker 累積的快照,以尾段視窗算近期速率。
-  卡片上會標示這個數字是用哪一種方法算出來的。
+- **線性**(資料還不足時的後備):`本期已用量 / 帳期內已過天數`。
+- **燃燒率**(有每日資料後優先採用):取最近 7 個「完整日」的每日用量平均當速率。
+  卡片上會標示用了哪一種方法。
 
 ## 本機開發
 
@@ -95,11 +97,23 @@ npm run build     # 正式建置 + 產生 PWA service worker
    );
    CREATE INDEX IF NOT EXISTS idx_snap_token_time ON snapshots (token_id, captured_at);
    CREATE INDEX IF NOT EXISTS idx_snap_token_period ON snapshots (token_id, period_start);
+   CREATE TABLE IF NOT EXISTS daily_usage (
+     token_id   TEXT NOT NULL,
+     day_start  INTEGER NOT NULL,
+     units      REAL NOT NULL DEFAULT 0,
+     successful INTEGER NOT NULL DEFAULT 0,
+     proxy      REAL NOT NULL DEFAULT 0,
+     captcha    REAL NOT NULL DEFAULT 0,
+     seconds    REAL NOT NULL DEFAULT 0,
+     updated_at INTEGER NOT NULL,
+     PRIMARY KEY (token_id, day_start)
+   );
+   CREATE INDEX IF NOT EXISTS idx_daily_token_day ON daily_usage (token_id, day_start);
    ```
-   應看到建立 `tokens`、`snapshots` 兩張表成功。
-   - 若回 `Requests without any query are not supported`(空查詢):把上面 4 個 statement 分開、一句一句 Execute。
+   應看到建立 `tokens`、`snapshots`、`daily_usage` 三張表成功。
+   - 若回 `Requests without any query are not supported`(空查詢):把每個 statement 分開、一句一句 Execute。
    - 或改用 CLI(最保險):`wrangler login` 後執行
-     `wrangler d1 execute browserless-monitor --remote --file=migrations/0001_init.sql`。
+     `wrangler d1 migrations apply browserless-monitor --remote`(會套用 migrations/ 下所有檔案)。
 5. 在資料庫頁面複製 **Database ID**。
 6. 把這個 ID 填進 repo 裡 `wrangler.toml` 與 `worker/wrangler.toml` 兩個檔的 `database_id`,
    然後 commit + push(Database ID 不是機密)。

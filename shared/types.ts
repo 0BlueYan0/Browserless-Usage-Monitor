@@ -23,12 +23,20 @@ export interface TokenPublic extends TokenRecord {
   tokenMask: string
 }
 
-/** Normalized usage for one token within the current billing period. */
+/** One day's usage, as returned by accountUsage(timeframe: week). */
+export interface DailyBucket {
+  dayStart: number
+  units: number
+  successful: number
+  proxy: number
+  captcha: number
+  seconds: number
+}
+
+/** Normalized usage summary for one token within the current billing period. */
 export interface UsageResult {
-  totalUnitsUsed: number
-  timeUnits: number | null
-  proxyUnits: number | null
-  captchaUnits: number | null
+  usedThisPeriod: number
+  weekUnits: number
   periodStart: number
   fetchedAt: number
 }

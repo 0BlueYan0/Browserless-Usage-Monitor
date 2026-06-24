@@ -28,25 +28,16 @@ export function TokenForm({
   const [tier, setTier] = useState(initial ? tierLabelFor(initial.planLimit) : 'Free')
   const [planLimit, setPlanLimit] = useState(initial?.planLimit ?? 1000)
   const [resetDay, setResetDay] = useState(initial?.resetDay ?? 1)
-  const [useAccount, setUseAccount] = useState(initial?.hasAccountLogin ?? false)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
 
   const [test, setTest] = useState<TestResult | null>(null)
   const [testing, setTesting] = useState(false)
 
   function buildInput(): TokenInput {
-    let account: TokenInput['account']
-    if (useAccount && email && password) account = { email, password }
-    else if (!useAccount && editing && initial?.hasAccountLogin) account = null
-    else account = undefined
-
     return {
       label: label.trim(),
       source,
       endpointUrl: source === 'self-hosted' ? endpointUrl.trim() : null,
       apiToken: apiToken.trim() || undefined,
-      account,
       planLimit: Number(planLimit),
       resetDay: Number(resetDay),
     }
@@ -62,10 +53,9 @@ export function TokenForm({
     setTesting(true)
     setTest(null)
     try {
-      const result = await apiClient.testToken(buildInput())
-      setTest(result)
+      setTest(await apiClient.testToken(buildInput()))
     } catch (err) {
-      setTest({ ok: false, status: 'error', error: (err as Error).message })
+      setTest({ ok: false, error: (err as Error).message })
     } finally {
       setTesting(false)
     }
@@ -81,11 +71,9 @@ export function TokenForm({
         onSubmit(buildInput())
       }}
     >
-      <div className="flex items-center justify-between">
-        <h3 className="font-mono text-sm uppercase tracking-[0.16em] text-fg">
-          {editing ? 'Edit token' : 'New token'}
-        </h3>
-      </div>
+      <h3 className="font-mono text-sm uppercase tracking-[0.16em] text-fg">
+        {editing ? 'Edit token' : 'New token'}
+      </h3>
 
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
@@ -172,57 +160,15 @@ export function TokenForm({
         </label>
       </div>
 
-      {source === 'cloud' && (
-        <div className="rounded-xl border border-line p-4">
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={useAccount}
-              onChange={(e) => setUseAccount(e.target.checked)}
-            />
-            <span className="text-sm text-fg">Store account login (fallback)</span>
-          </label>
-          <p className="mt-1 text-xs text-muted">
-            Only needed if the token-only usage query is rejected. 2FA accounts are not supported.
-          </p>
-          {useAccount && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
-              <input
-                className="field"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="account email"
-                autoComplete="off"
-              />
-              <input
-                className="field"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={initial?.hasAccountLogin ? 'enter to replace' : 'account password'}
-                autoComplete="off"
-              />
-            </div>
-          )}
-        </div>
-      )}
-
       {test && (
         <div
           className={`rounded-lg border px-3 py-2 text-xs ${
-            test.ok
-              ? 'border-ok/30 bg-ok/10 text-ok'
-              : test.status === 'needs-login'
-                ? 'border-warn/30 bg-warn/10 text-warn'
-                : 'border-crit/30 bg-crit/10 text-crit'
+            test.ok ? 'border-ok/30 bg-ok/10 text-ok' : 'border-crit/30 bg-crit/10 text-crit'
           }`}
         >
           {test.ok
-            ? `Connection OK · ${fmtUnits(test.usage?.totalUnitsUsed ?? 0)} units used this period.`
-            : test.status === 'needs-login'
-              ? `Token-only query failed — add account login. (${test.error})`
-              : `Failed: ${test.error}`}
+            ? `Connection OK · ${fmtUnits(test.weekUnits ?? 0)} units in the last 7 days.`
+            : `Failed: ${test.error}`}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import {
   burnRateFromSnapshots,
   computePeriod,
   computeProjection,
+  computeProjectionFromDaily,
   normalizeResetDay,
 } from './projection'
 
@@ -159,5 +160,45 @@ describe('computeProjection', () => {
     expect(p.dailyRate).toBe(0)
     expect(p.daysUntilExhausted).toBeNull()
     expect(p.willExceed).toBe(false)
+  })
+})
+
+describe('computeProjectionFromDaily', () => {
+  const noon25 = Date.UTC(2026, 5, 25, 12) // June 25, 12:00 UTC
+
+  it('sums period usage, burn-rate from complete days, flags exhaustion', () => {
+    const daily = [
+      { dayStart: utc(2026, 6, 20), units: 100 },
+      { dayStart: utc(2026, 6, 21), units: 100 },
+      { dayStart: utc(2026, 6, 22), units: 100 },
+      { dayStart: utc(2026, 6, 23), units: 100 },
+      { dayStart: utc(2026, 6, 24), units: 100 },
+      { dayStart: utc(2026, 6, 25), units: 40 }, // today (partial)
+    ]
+    const p = computeProjectionFromDaily({ planLimit: 1000, daily, resetDay: 1, now: noon25 })
+    expect(p.used).toBe(540)
+    expect(p.method).toBe('burn-rate')
+    expect(p.dailyRate).toBeCloseTo(100, 6) // 500 over 5 complete days, today excluded
+    expect(p.willExceed).toBe(true)
+    expect(p.daysUntilExhausted).toBeCloseTo(4.6, 1)
+  })
+
+  it('falls back to linear when there are no complete days', () => {
+    const daily = [{ dayStart: utc(2026, 6, 25), units: 200 }]
+    const p = computeProjectionFromDaily({ planLimit: 5000, daily, resetDay: 1, now: noon25 })
+    expect(p.method).toBe('linear')
+    expect(p.used).toBe(200)
+  })
+
+  it('only counts buckets inside the billing period', () => {
+    const daily = [
+      { dayStart: utc(2026, 6, 22), units: 100 },
+      { dayStart: utc(2026, 6, 23), units: 100 },
+      { dayStart: utc(2026, 6, 24), units: 100 },
+      { dayStart: utc(2026, 6, 25), units: 50 },
+    ]
+    // reset day 24 -> period starts June 24
+    const p = computeProjectionFromDaily({ planLimit: 1000, daily, resetDay: 24, now: noon25 })
+    expect(p.used).toBe(150)
   })
 })

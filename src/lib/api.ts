@@ -1,4 +1,4 @@
-import type { TokenInput, TokenPublic, UsageResponse, UsageResult } from '../../shared/types'
+import type { TokenInput, TokenPublic, UsageResponse } from '../../shared/types'
 
 export class ApiError extends Error {
   status: number
@@ -25,9 +25,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface TestResult {
   ok: boolean
-  status?: 'needs-login' | 'error'
+  weekUnits?: number
+  days?: number
   error?: string
-  usage?: UsageResult
 }
 
 export const apiClient = {

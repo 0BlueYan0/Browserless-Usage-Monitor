@@ -3,21 +3,21 @@ import { Hono } from 'hono'
 import { handle } from 'hono/cloudflare-pages'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 
-import type { Projection, TokenInput, TokenPublic, TokenUsage, UsageResponse } from '../../shared/types'
+import type { TokenInput, TokenPublic, TokenUsage, UsageResponse, UsageResult } from '../../shared/types'
 import { encryptSecret, decryptSecret } from '../../shared/crypto'
 import { createSessionToken, verifyPassword, verifySessionToken } from '../../shared/session'
-import { computePeriod, computeProjection } from '../../shared/projection'
-import { NeedsLoginError, fetchUsageForToken, decryptTokenSecrets } from '../../shared/usage'
+import { computePeriod, computeProjectionFromDaily } from '../../shared/projection'
+import { decryptTokenSecrets, fetchTokenUsage } from '../../shared/usage'
 import {
   type TokenRow,
   deleteTokenRow,
-  getRecentSnapshots,
+  getDailyUsage,
   getTokenRow,
-  insertSnapshot,
   insertTokenRow,
   listTokenRows,
   rowToRecord,
   updateTokenRow,
+  upsertDailyUsage,
 } from '../../shared/db'
 
 interface Env {
@@ -29,6 +29,7 @@ interface Env {
 
 const SESSION_COOKIE = 'session'
 const SESSION_TTL = 60 * 60 * 24 * 7
+const DAY_MS = 24 * 60 * 60 * 1000
 
 const app = new Hono<{ Bindings: Env }>()
 
@@ -113,9 +114,7 @@ app.post('/api/tokens', async (c) => {
     source: input.source,
     endpoint_url: input.source === 'self-hosted' ? input.endpointUrl ?? null : null,
     api_token_enc: await encryptSecret(input.apiToken!, c.env.ENCRYPTION_KEY),
-    account_enc: input.account
-      ? await encryptSecret(JSON.stringify(input.account), c.env.ENCRYPTION_KEY)
-      : null,
+    account_enc: null,
     plan_limit: input.planLimit,
     reset_day: input.resetDay,
     sort_order: rows.length,
@@ -147,11 +146,6 @@ app.put('/api/tokens/:id', async (c) => {
   if (input.apiToken) {
     set.api_token_enc = await encryptSecret(input.apiToken, c.env.ENCRYPTION_KEY)
   }
-  if (input.account === null) {
-    set.account_enc = null
-  } else if (input.account) {
-    set.account_enc = await encryptSecret(JSON.stringify(input.account), c.env.ENCRYPTION_KEY)
-  }
 
   await updateTokenRow(c.env.DB, id, set)
   const updated = await getTokenRow(c.env.DB, id)
@@ -160,6 +154,7 @@ app.put('/api/tokens/:id', async (c) => {
 
 app.delete('/api/tokens/:id', async (c) => {
   const id = c.req.param('id')
+  await c.env.DB.prepare('DELETE FROM daily_usage WHERE token_id = ?').bind(id).run()
   await c.env.DB.prepare('DELETE FROM snapshots WHERE token_id = ?').bind(id).run()
   await deleteTokenRow(c.env.DB, id)
   return c.json({ ok: true })
@@ -181,19 +176,13 @@ app.post('/api/tokens/test', async (c) => {
     sortOrder: 0,
     createdAt: 0,
     updatedAt: 0,
-    hasAccountLogin: !!input.account,
+    hasAccountLogin: false,
   }
   try {
-    const usage = await fetchUsageForToken(record, {
-      apiToken: input.apiToken!,
-      account: input.account ?? undefined,
-    })
-    return c.json({ ok: true, usage })
+    const usage = await fetchTokenUsage(record, { apiToken: input.apiToken! })
+    return c.json({ ok: true, weekUnits: usage.weekUnits, days: usage.daily.length })
   } catch (err) {
-    if (err instanceof NeedsLoginError) {
-      return c.json({ ok: false, status: 'needs-login', error: err.message })
-    }
-    return c.json({ ok: false, status: 'error', error: (err as Error).message })
+    return c.json({ ok: false, error: (err as Error).message })
   }
 })
 
@@ -204,7 +193,7 @@ app.get('/api/usage', async (c) => {
   const tokens = await Promise.all(rows.map((row) => buildTokenUsage(row, c.env, now)))
 
   const okTokens = tokens.filter((t) => t.status === 'ok' && t.projection)
-  const totalUsed = okTokens.reduce((s, t) => s + (t.usage?.totalUnitsUsed ?? 0), 0)
+  const totalUsed = okTokens.reduce((s, t) => s + (t.projection?.used ?? 0), 0)
   const totalLimit = tokens.reduce((s, t) => s + t.token.planLimit, 0)
 
   let soonestExhaustionTokenId: string | null = null
@@ -245,45 +234,40 @@ async function buildTokenUsage(row: TokenRow, env: Env, now: number): Promise<To
   const { start: periodStart } = computePeriod(row.reset_day, now)
   try {
     const secrets = await decryptTokenSecrets(row, env.ENCRYPTION_KEY)
-    const record = rowToRecord(row)
-    const usage = await fetchUsageForToken(record, secrets, now)
+    const usage = await fetchTokenUsage(rowToRecord(row), secrets)
 
-    // Record a snapshot so burn-rate improves over time (manual refresh contributes too),
-    // but throttle to avoid bloating the table on frequent dashboard polls.
-    const existing = await getRecentSnapshots(env.DB, row.id, periodStart)
-    const last = existing[existing.length - 1]
-    const SNAPSHOT_THROTTLE_MS = 30 * 60 * 1000
-    let snapshots = existing
-    if (!last || usage.fetchedAt - last.capturedAt >= SNAPSHOT_THROTTLE_MS) {
-      await insertSnapshot(env.DB, {
-        tokenId: row.id,
-        capturedAt: usage.fetchedAt,
-        periodStart,
-        totalUnits: usage.totalUnitsUsed,
-        timeUnits: usage.timeUnits,
-        proxyUnits: usage.proxyUnits,
-        captchaUnits: usage.captchaUnits,
-      })
-      snapshots = [...existing, { capturedAt: usage.fetchedAt, totalUnits: usage.totalUnitsUsed }]
+    // Accumulate each day's bucket so the monthly total survives the 7-day API window.
+    for (const b of usage.daily) {
+      await upsertDailyUsage(env.DB, row.id, b, usage.fetchedAt)
     }
 
-    const projection: Projection = computeProjection({
+    // Read buckets back covering both the billing period and the trailing rate window.
+    const since = Math.min(periodStart, now - 8 * DAY_MS)
+    const daily = await getDailyUsage(env.DB, row.id, since)
+    const projection = computeProjectionFromDaily({
       planLimit: row.plan_limit,
-      used: usage.totalUnitsUsed,
+      daily,
       resetDay: row.reset_day,
       now,
-      snapshots,
     })
-    return { token, usage, projection, sparkline: snapshots, status: 'ok' }
+    const usageResult: UsageResult = {
+      usedThisPeriod: projection.used,
+      weekUnits: usage.weekUnits,
+      periodStart,
+      fetchedAt: usage.fetchedAt,
+    }
+    const sparkline = daily
+      .filter((d) => d.dayStart >= periodStart)
+      .map((d) => ({ capturedAt: d.dayStart, totalUnits: d.units }))
+    return { token, usage: usageResult, projection, sparkline, status: 'ok' }
   } catch (err) {
-    const status = err instanceof NeedsLoginError ? 'needs-login' : 'error'
-    const snapshots = await getRecentSnapshots(env.DB, row.id, periodStart)
+    const daily = await getDailyUsage(env.DB, row.id, periodStart)
     return {
       token,
       usage: null,
       projection: null,
-      sparkline: snapshots,
-      status,
+      sparkline: daily.map((d) => ({ capturedAt: d.dayStart, totalUnits: d.units })),
+      status: 'error',
       error: (err as Error).message,
     }
   }
@@ -343,13 +327,6 @@ function validateTokenInput(
   if (opts.requireApiToken && (typeof body.apiToken !== 'string' || !body.apiToken.trim())) {
     return { error: 'apiToken is required' }
   }
-  let account = body.account
-  if (account !== undefined && account !== null) {
-    if (typeof account.email !== 'string' || typeof account.password !== 'string' || !account.email || !account.password) {
-      return { error: 'account login requires both email and password' }
-    }
-    account = { email: account.email.trim(), password: account.password }
-  }
 
   return {
     value: {
@@ -357,7 +334,6 @@ function validateTokenInput(
       source: body.source,
       endpointUrl: typeof body.endpointUrl === 'string' ? body.endpointUrl.trim() : null,
       apiToken: typeof body.apiToken === 'string' ? body.apiToken.trim() : undefined,
-      account,
       planLimit,
       resetDay,
     },
