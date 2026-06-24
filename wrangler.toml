@@ -1,6 +1,6 @@
 # Cloudflare Pages project config (SPA + Pages Functions under /functions).
 # After `npm run db:create`, paste the printed database_id below (and into worker/wrangler.toml).
-name = "browserless-usage-monitor"
+name = "browserless-usage-monitor-snapshot"
 pages_build_output_dir = "dist"
 compatibility_date = "2025-06-01"
 
