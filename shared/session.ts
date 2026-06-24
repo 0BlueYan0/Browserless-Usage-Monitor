@@ -3,7 +3,9 @@ import { fromB64, toB64 } from './crypto'
 
 const enc = new TextEncoder()
 const dec = new TextDecoder()
-const DEFAULT_ITERATIONS = 210000
+// Cloudflare Workers' WebCrypto rejects PBKDF2 iteration counts above 100000.
+const MAX_ITERATIONS = 100000
+const DEFAULT_ITERATIONS = 100000
 
 function toB64Url(bytes: Uint8Array): string {
   return toB64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -23,9 +25,10 @@ function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 
 /** Produce a `pbkdf2$<iterations>$<saltB64>$<hashB64>` string. */
 export async function hashPassword(password: string, iterations = DEFAULT_ITERATIONS): Promise<string> {
+  const iters = Math.min(iterations, MAX_ITERATIONS)
   const salt = crypto.getRandomValues(new Uint8Array(16))
-  const bits = await deriveBits(password, salt, iterations, 256)
-  return `pbkdf2$${iterations}$${toB64(salt)}$${toB64(bits)}`
+  const bits = await deriveBits(password, salt, iters, 256)
+  return `pbkdf2$${iters}$${toB64(salt)}$${toB64(bits)}`
 }
 
 /** Constant-time verification against a stored {@link hashPassword} string. */

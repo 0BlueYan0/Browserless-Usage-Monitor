@@ -11,7 +11,7 @@ const sessionSecret = b64(crypto.getRandomValues(new Uint8Array(48)))
 async function hashPassword(pw) {
   const enc = new TextEncoder()
   const salt = crypto.getRandomValues(new Uint8Array(16))
-  const iterations = 210000
+  const iterations = 100000 // Cloudflare Workers WebCrypto caps PBKDF2 at 100000
   const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveBits'])
   const bits = await crypto.subtle.deriveBits(
     { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },

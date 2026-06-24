@@ -48,6 +48,13 @@ describe('password hashing', () => {
   it('rejects malformed stored hashes', async () => {
     expect(await verifyPassword('x', 'not-a-hash')).toBe(false)
   })
+
+  it('caps PBKDF2 iterations at the Cloudflare Workers limit (100000)', async () => {
+    const stored = await hashPassword('x', 500000)
+    const iters = Number(stored.split('$')[1])
+    expect(iters).toBeLessThanOrEqual(100000)
+    expect(await verifyPassword('x', stored)).toBe(true)
+  })
 })
 
 describe('session tokens', () => {
