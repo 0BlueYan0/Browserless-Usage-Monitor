@@ -30,6 +30,7 @@ export async function hashPassword(password: string, iterations = DEFAULT_ITERAT
 
 /** Constant-time verification against a stored {@link hashPassword} string. */
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  if (typeof stored !== 'string' || stored.length === 0) return false
   const parts = stored.split('$')
   if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false
   const iterations = Number.parseInt(parts[1], 10)

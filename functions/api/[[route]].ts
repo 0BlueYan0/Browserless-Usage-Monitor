@@ -32,9 +32,12 @@ const SESSION_TTL = 60 * 60 * 24 * 7
 
 const app = new Hono<{ Bindings: Env }>()
 
-// --- Auth guard for everything under /api except the login endpoint ---
+// Public endpoints (no session required).
+const PUBLIC_PATHS = new Set(['/api/auth/login', '/api/health'])
+
+// --- Auth guard for everything under /api except the public endpoints ---
 app.use('/api/*', async (c, next) => {
-  if (c.req.path === '/api/auth/login') return next()
+  if (PUBLIC_PATHS.has(c.req.path)) return next()
   const token = getCookie(c, SESSION_COOKIE)
   if (!token || !(await verifySessionToken(token, c.env.SESSION_SECRET))) {
     return c.json({ error: 'unauthorized' }, 401)
@@ -42,8 +45,30 @@ app.use('/api/*', async (c, next) => {
   return next()
 })
 
+// --- Diagnostics (public): reports which bindings/secrets are present, no values. ---
+app.get('/api/health', (c) =>
+  c.json({
+    ok: true,
+    config: {
+      DB: !!c.env.DB,
+      ENCRYPTION_KEY: !!c.env.ENCRYPTION_KEY,
+      APP_PASSWORD_HASH: !!c.env.APP_PASSWORD_HASH,
+      SESSION_SECRET: !!c.env.SESSION_SECRET,
+    },
+  }),
+)
+
 // --- Auth ---
 app.post('/api/auth/login', async (c) => {
+  if (!c.env.APP_PASSWORD_HASH || !c.env.SESSION_SECRET) {
+    return c.json(
+      {
+        error:
+          'Server not configured: set APP_PASSWORD_HASH and SESSION_SECRET (Pages → Settings → Variables and Secrets), then redeploy.',
+      },
+      500,
+    )
+  }
   const body = await readJson<{ password?: string }>(c)
   const password = body?.password
   if (!password || !(await verifyPassword(password, c.env.APP_PASSWORD_HASH))) {
