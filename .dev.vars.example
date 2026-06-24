@@ -1,0 +1,6 @@
+# Local development secrets for `wrangler pages dev`.
+# Copy to `.dev.vars` (gitignored) and fill in. Generate values with:
+#   npm run secrets:gen -- "your-dashboard-password"
+ENCRYPTION_KEY="base64-32-byte-key"
+APP_PASSWORD_HASH="pbkdf2$210000$<saltB64>$<hashB64>"
+SESSION_SECRET="some-long-random-string"

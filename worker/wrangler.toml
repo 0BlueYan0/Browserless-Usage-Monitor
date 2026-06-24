@@ -1,0 +1,19 @@
+# Scheduled Worker that records usage snapshots into the shared D1 database.
+# Pages Functions cannot run Cron Triggers, so snapshots live in this separate Worker.
+name = "browserless-usage-monitor-cron"
+main = "index.ts"
+compatibility_date = "2025-06-01"
+
+# Run every 6 hours. Adjust as needed.
+[triggers]
+crons = ["0 */6 * * *"]
+
+# Bind the SAME D1 database used by the Pages project.
+[[d1_databases]]
+binding = "DB"
+database_name = "browserless-monitor"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# Secret needed to decrypt stored tokens:
+#   wrangler secret put ENCRYPTION_KEY -c worker/wrangler.toml
+# Must be the SAME ENCRYPTION_KEY used by the Pages project.

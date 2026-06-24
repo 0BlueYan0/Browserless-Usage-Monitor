@@ -1,0 +1,177 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Hanken Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', monospace;
+
+  --color-ink: #0a0e14;
+  --color-ink-2: #0c1119;
+  --color-panel: #111824;
+  --color-panel-2: #161f2e;
+  --color-line: rgba(148, 163, 184, 0.1);
+  --color-line-strong: rgba(148, 163, 184, 0.2);
+  --color-fg: #e7edf4;
+  --color-muted: #8a94a6;
+  --color-faint: #5b6577;
+  --color-brand: #6366f1;
+  --color-signal: #22d3ee;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-crit: #fb7185;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+  body {
+    background-color: var(--color-ink);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    background-image:
+      radial-gradient(130% 90% at 50% -20%, rgba(99, 102, 241, 0.12), transparent 55%),
+      radial-gradient(80% 60% at 100% 0%, rgba(34, 211, 238, 0.06), transparent 50%),
+      linear-gradient(var(--color-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+    background-size:
+      100% 100%,
+      100% 100%,
+      48px 48px,
+      48px 48px;
+    background-attachment: fixed;
+    min-height: 100dvh;
+  }
+  ::selection {
+    background: rgba(99, 102, 241, 0.4);
+  }
+  /* Number readouts use tabular figures so they don't jitter while live-updating. */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+}
+
+@layer components {
+  .panel {
+    background: linear-gradient(180deg, var(--color-panel-2), var(--color-panel));
+    border: 1px solid var(--color-line);
+    border-radius: 16px;
+  }
+  .panel-hover {
+    transition:
+      border-color 0.2s ease,
+      transform 0.2s ease;
+  }
+  .panel-hover:hover {
+    border-color: var(--color-line-strong);
+    transform: translateY(-2px);
+  }
+  .label {
+    font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    font-size: 0.64rem;
+    color: var(--color-faint);
+  }
+  .field {
+    width: 100%;
+    background: var(--color-ink-2);
+    border: 1px solid var(--color-line);
+    border-radius: 10px;
+    padding: 0.55rem 0.75rem;
+    color: var(--color-fg);
+    font-size: 0.9rem;
+    outline: none;
+    transition:
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+  .field:focus {
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+  }
+  .field::placeholder {
+    color: var(--color-faint);
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    border-radius: 10px;
+    padding: 0.5rem 0.9rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition:
+      background 0.15s ease,
+      border-color 0.15s ease,
+      opacity 0.15s ease;
+    border: 1px solid transparent;
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .btn-primary {
+    background: var(--color-brand);
+    color: white;
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: #7174f5;
+  }
+  .btn-ghost {
+    background: transparent;
+    border-color: var(--color-line-strong);
+    color: var(--color-fg);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: rgba(148, 163, 184, 0.08);
+  }
+  .btn-danger {
+    background: transparent;
+    border-color: rgba(251, 113, 133, 0.4);
+    color: var(--color-crit);
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: rgba(251, 113, 133, 0.12);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rise {
+  animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+.animate-pulse-dot {
+  animation: pulse-dot 1.8s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.animate-spin-slow {
+  animation: spin 0.85s linear infinite;
+}

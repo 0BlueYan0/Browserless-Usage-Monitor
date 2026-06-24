@@ -1,0 +1,16 @@
+# Cloudflare Pages project config (SPA + Pages Functions under /functions).
+# After `npm run db:create`, paste the printed database_id below (and into worker/wrangler.toml).
+name = "browserless-usage-monitor"
+pages_build_output_dir = "dist"
+compatibility_date = "2025-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "browserless-monitor"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+# Secrets (do NOT put real values here — use `.dev.vars` locally and
+# `wrangler pages secret put <NAME>` for production):
+#   ENCRYPTION_KEY     - base64 32-byte key for AES-GCM token encryption
+#   APP_PASSWORD_HASH  - PBKDF2 hash of the dashboard password (see scripts/gen-secrets.mjs)
+#   SESSION_SECRET     - random string for HMAC session-cookie signing
