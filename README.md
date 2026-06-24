@@ -56,29 +56,83 @@ npm run typecheck # tsc 檢查 app 與 worker/functions/shared
 npm run build     # 正式建置 + 產生 PWA service worker
 ```
 
-## 部署
+## 部署:Cloudflare 網頁介面(建議)
 
-1. **建立 D1 資料庫**,把它的 id 填進 `wrangler.toml` 與 `worker/wrangler.toml`:
-   ```bash
-   npm run db:create
-   npm run db:migrate:remote
-   ```
-2. **設定密鑰**(用 `scripts/gen-secrets.mjs` 產生的值):
-   ```bash
-   wrangler pages secret put ENCRYPTION_KEY
-   wrangler pages secret put APP_PASSWORD_HASH
-   wrangler pages secret put SESSION_SECRET
-   # 排程 Worker 需要「相同的」加密金鑰:
-   wrangler secret put ENCRYPTION_KEY -c worker/wrangler.toml
-   ```
-3. **部署** Pages app 與排程 Worker:
-   ```bash
-   npm run deploy            # 建置 + wrangler pages deploy
-   npm run worker:deploy     # 部署排程快照 Worker
-   ```
+> 介面選單名稱 Cloudflare 偶爾會調整,以下以 2026 年的版面為準,位置若略有不同請找相近名稱。
+> 全程用「Git 連結」自動建置,這樣 Pages Functions 才會被一起編譯部署。
 
-兩者綁定同一個 D1 資料庫(以 `database_id` 為準),所以儀表板與排程 Worker
-會自動共用資料。
+前置:先把這個 repo push 到 GitHub 或 GitLab。
+
+### 步驟 1 — 建立 D1 資料庫並建表
+1. 登入 <https://dash.cloudflare.com>。
+2. 左側 **Storage & Databases → D1 SQL Database**(或 Workers & Pages → D1)→ **Create**。
+3. 名稱填 `browserless-monitor` → **Create**。
+4. 進入該資料庫 → **Console** 分頁 → 把 `migrations/0001_init.sql` 全部內容貼上 → **Execute**。
+   應看到建立 `tokens`、`snapshots` 兩張表成功。
+5. 在資料庫頁面複製 **Database ID**。
+6. 把這個 ID 填進 repo 裡 `wrangler.toml` 與 `worker/wrangler.toml` 兩個檔的 `database_id`,
+   然後 commit + push(Database ID 不是機密)。
+
+### 步驟 2 — 產生密鑰值(本機跑一次)
+```bash
+node scripts/gen-secrets.mjs "你的儀表板密碼"
+```
+記下印出的 `ENCRYPTION_KEY`、`APP_PASSWORD_HASH`、`SESSION_SECRET` 三個值,待會貼到網頁。
+
+### 步驟 3 — 建立 Pages 專案(SPA + API)
+1. Dashboard → **Workers & Pages → Create → Pages → Connect to Git** → 選你的 repo。
+2. 建置設定:
+   - **Build command**:`npm run build`
+   - **Build output directory**:`dist`
+   - Framework preset 可留 *None*。
+3. **Save and Deploy**(第一次建置會成功,但還沒綁 D1/密鑰,先繼續)。
+4. 進專案 **Settings**:
+   - **Variables and Secrets**(變數與密鑰):新增 `ENCRYPTION_KEY`、`APP_PASSWORD_HASH`、
+     `SESSION_SECRET` 三個,型別選 **Secret(加密)**,值用步驟 2 的輸出,套用到 **Production**
+     (若要用預覽分支也加到 Preview)。
+   - **Bindings**(綁定)→ 新增 **D1 database**,變數名稱填 `DB`,選 `browserless-monitor`。
+     (`wrangler.toml` 已含此綁定,只要 database_id 正確通常會自動套用;沒有就在這裡手動加。)
+5. 回 **Deployments** → 對最新一筆點 **Retry / Redeploy**,讓密鑰與綁定生效。
+6. 打開 `https://<專案>.pages.dev` → 用步驟 2 的密碼登入。
+
+### 步驟 4 — 部署排程 Worker(寫用量快照)
+> Pages Functions 不能跑 Cron,所以快照交給這個獨立 Worker。
+
+網頁做法(Workers Builds,Git 連結):
+1. Dashboard → **Workers & Pages → Create → Workers → Connect to Git** → 匯入同一個 repo。
+2. 在建置/部署設定把 **Deploy command** 設成:
+   ```
+   npx wrangler deploy -c worker/wrangler.toml
+   ```
+   (Build command 可留空或 `npm install`。)
+3. 建立後進該 Worker **Settings**:
+   - **Variables and Secrets** → 新增 `ENCRYPTION_KEY`(型別 Secret),值必須和 Pages 那邊**完全相同**。
+   - **Bindings** → 確認有 D1 綁定 `DB` 指到 `browserless-monitor`(來自 `worker/wrangler.toml`;沒有就手動加)。
+   - **Triggers → Cron Triggers** → 應看到 `0 */6 * * *`(來自設定檔);沒有就手動新增。
+
+兩個專案綁定的是同一個 D1 資料庫(以 `database_id` 為準),所以儀表板與排程 Worker 會自動共用資料。
+
+---
+
+## 部署:Wrangler CLI(替代方案)
+
+```bash
+wrangler login
+
+# 1) 建立 D1,把印出的 database_id 填進 wrangler.toml 與 worker/wrangler.toml
+npm run db:create
+npm run db:migrate:remote
+
+# 2) 設定密鑰(值來自 scripts/gen-secrets.mjs)
+wrangler pages secret put ENCRYPTION_KEY
+wrangler pages secret put APP_PASSWORD_HASH
+wrangler pages secret put SESSION_SECRET
+wrangler secret put ENCRYPTION_KEY -c worker/wrangler.toml   # 排程 Worker 用相同金鑰
+
+# 3) 部署
+npm run deploy            # 建置 + wrangler pages deploy
+npm run worker:deploy     # 部署排程快照 Worker
+```
 
 ## 專案結構
 
