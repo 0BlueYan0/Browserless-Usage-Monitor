@@ -167,7 +167,9 @@ export function TokenForm({
           }`}
         >
           {test.ok
-            ? `Connection OK · ${fmtUnits(test.weekUnits ?? 0)} units in the last 7 days.`
+            ? test.limit != null
+              ? `Connection OK · ${fmtUnits(test.used ?? 0)} / ${fmtUnits(test.limit)} units used this period.`
+              : `Connection OK · ${fmtUnits(test.weekUnits ?? 0)} units in the last 7 days.`
             : `Failed: ${test.error}`}
         </div>
       )}

@@ -59,7 +59,7 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
         <UsageBar percent={percent} projectedPercent={projectedPercent} health={health} />
         <div className="mt-2 flex justify-between font-mono text-xs tnum text-muted">
           <span>{usage ? fmtUnits(usage.usedThisPeriod) : '—'}</span>
-          <span>{fmtUnits(token.planLimit)} u</span>
+          <span>{fmtUnits(projection?.planLimit ?? token.planLimit)} u</span>
         </div>
       </div>
 
@@ -71,6 +71,11 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
       {status === 'error' && (
         <p className="mt-4 rounded-lg border border-crit/30 bg-crit/10 px-3 py-2 text-xs text-crit">
           {data.error || 'Failed to fetch usage.'}
+        </p>
+      )}
+      {usage && usage.fetchedAt === 0 && (
+        <p className="mt-4 rounded-lg border border-line bg-[rgba(148,163,184,0.06)] px-3 py-2 text-xs text-muted">
+          Awaiting first sync — hit Refresh.
         </p>
       )}
 
@@ -101,7 +106,7 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
         </>
       )}
 
-      {usage && (
+      {usage && usage.fetchedAt > 0 && (
         <div className="mt-3 flex justify-between font-mono text-[0.6rem] uppercase tracking-wider text-faint">
           <span>7d · {fmtUnits(usage.weekUnits)} u</span>
           <span>synced {relTime(usage.fetchedAt)}</span>

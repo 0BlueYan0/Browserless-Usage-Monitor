@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '../lib/api'
 import { fmtDays, fmtPct, fmtUnits, relTime } from '../lib/format'
 import { HEALTH_TEXT, healthFromPercent } from '../lib/plans'
@@ -27,11 +27,18 @@ function RefreshIcon({ spinning }: { spinning: boolean }) {
 }
 
 export default function Dashboard() {
-  const { data, isLoading, isError, error, refetch, isFetching, dataUpdatedAt } = useQuery({
+  const qc = useQueryClient()
+  const { data, isLoading, isError, error, isFetching, dataUpdatedAt } = useQuery({
     queryKey: ['usage'],
     queryFn: apiClient.usage,
     refetchInterval: 120_000,
   })
+  // Refresh pulls fresh data from browserless into D1, then re-reads the cache.
+  const refresh = useMutation({
+    mutationFn: apiClient.refresh,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
+  })
+  const syncing = refresh.isPending || isFetching
 
   const header = (
     <div className="mb-6 flex items-end justify-between gap-4">
@@ -48,11 +55,11 @@ export default function Dashboard() {
         <button
           type="button"
           className="btn btn-ghost"
-          onClick={() => refetch()}
-          disabled={isFetching}
+          onClick={() => refresh.mutate()}
+          disabled={syncing}
         >
-          <RefreshIcon spinning={isFetching} />
-          {isFetching ? 'Syncing' : 'Refresh'}
+          <RefreshIcon spinning={syncing} />
+          {syncing ? 'Syncing' : 'Refresh'}
         </button>
       </div>
     </div>

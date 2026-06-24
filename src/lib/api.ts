@@ -25,8 +25,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
 export interface TestResult {
   ok: boolean
+  used?: number | null
+  limit?: number | null
   weekUnits?: number
-  days?: number
   error?: string
 }
 
@@ -51,4 +52,5 @@ export const apiClient = {
   testToken: (input: TokenInput) =>
     api<TestResult>('/api/tokens/test', { method: 'POST', body: JSON.stringify(input) }),
   usage: () => api<UsageResponse>('/api/usage'),
+  refresh: () => api<{ refreshed: number }>('/api/refresh', { method: 'POST' }),
 }

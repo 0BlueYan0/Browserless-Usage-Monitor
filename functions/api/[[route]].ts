@@ -4,20 +4,21 @@ import { handle } from 'hono/cloudflare-pages'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 
 import type { TokenInput, TokenPublic, TokenUsage, UsageResponse, UsageResult } from '../../shared/types'
+// (projection type is inferred from computeProjectionFromDaily)
 import { encryptSecret, decryptSecret } from '../../shared/crypto'
 import { createSessionToken, verifyPassword, verifySessionToken } from '../../shared/session'
-import { computePeriod, computeProjectionFromDaily } from '../../shared/projection'
-import { decryptTokenSecrets, fetchTokenUsage } from '../../shared/usage'
+import { computeAccountProjection, computePeriod, periodStartFromEnd } from '../../shared/projection'
+import { decryptTokenSecrets, fetchTokenUsage, persistUsage } from '../../shared/usage'
 import {
   type TokenRow,
   deleteTokenRow,
+  getAccountState,
   getDailyUsage,
   getTokenRow,
   insertTokenRow,
   listTokenRows,
   rowToRecord,
   updateTokenRow,
-  upsertDailyUsage,
 } from '../../shared/db'
 
 interface Env {
@@ -122,6 +123,8 @@ app.post('/api/tokens', async (c) => {
     updated_at: now,
   }
   await insertTokenRow(c.env.DB, row)
+  // Best-effort initial sync so the new token shows data without waiting for cron.
+  await refreshTokenUsage(row, c.env)
   return c.json({ token: await toPublic(row, c.env) }, 201)
 })
 
@@ -154,6 +157,7 @@ app.put('/api/tokens/:id', async (c) => {
 
 app.delete('/api/tokens/:id', async (c) => {
   const id = c.req.param('id')
+  await c.env.DB.prepare('DELETE FROM account_state WHERE token_id = ?').bind(id).run()
   await c.env.DB.prepare('DELETE FROM daily_usage WHERE token_id = ?').bind(id).run()
   await c.env.DB.prepare('DELETE FROM snapshots WHERE token_id = ?').bind(id).run()
   await deleteTokenRow(c.env.DB, id)
@@ -180,17 +184,28 @@ app.post('/api/tokens/test', async (c) => {
   }
   try {
     const usage = await fetchTokenUsage(record, { apiToken: input.apiToken! })
-    return c.json({ ok: true, weekUnits: usage.weekUnits, days: usage.daily.length })
+    return c.json({ ok: true, used: usage.used, limit: usage.limit, weekUnits: usage.weekUnits })
   } catch (err) {
     return c.json({ ok: false, error: (err as Error).message })
   }
 })
 
-// --- Usage overview ---
+// Refresh: pull fresh usage from browserless into D1 (manual button + on add).
+// Sequential to avoid bursting browserless's per-IP rate limit from Cloudflare.
+app.post('/api/refresh', async (c) => {
+  const rows = await listTokenRows(c.env.DB)
+  const results: Array<{ id: string; ok: boolean; error?: string }> = []
+  for (const row of rows) {
+    results.push(await refreshTokenUsage(row, c.env))
+  }
+  return c.json({ refreshed: results.filter((r) => r.ok).length, results })
+})
+
+// --- Usage overview (reads cached data from D1; no external calls) ---
 app.get('/api/usage', async (c) => {
   const rows = await listTokenRows(c.env.DB)
   const now = Date.now()
-  const tokens = await Promise.all(rows.map((row) => buildTokenUsage(row, c.env, now)))
+  const tokens = await Promise.all(rows.map((row) => readTokenUsage(row, c.env, now)))
 
   const okTokens = tokens.filter((t) => t.status === 'ok' && t.projection)
   const totalUsed = okTokens.reduce((s, t) => s + (t.projection?.used ?? 0), 0)
@@ -229,47 +244,54 @@ export const onRequest = handle(app)
 
 // --- helpers ---
 
-async function buildTokenUsage(row: TokenRow, env: Env, now: number): Promise<TokenUsage> {
+// Read cached usage from D1 and compute the projection. No external calls.
+async function readTokenUsage(row: TokenRow, env: Env, now: number): Promise<TokenUsage> {
   const token = await toPublic(row, env)
-  const { start: periodStart } = computePeriod(row.reset_day, now)
   try {
-    const secrets = await decryptTokenSecrets(row, env.ENCRYPTION_KEY)
-    const usage = await fetchTokenUsage(rowToRecord(row), secrets)
-
-    // Accumulate each day's bucket so the monthly total survives the 7-day API window.
-    for (const b of usage.daily) {
-      await upsertDailyUsage(env.DB, row.id, b, usage.fetchedAt)
-    }
-
-    // Read buckets back covering both the billing period and the trailing rate window.
+    const state = await getAccountState(env.DB, row.id)
+    const fallback = computePeriod(row.reset_day, now)
+    const periodEnd = state?.period_end ?? fallback.end
+    const periodStart = state?.period_end ? periodStartFromEnd(state.period_end) : fallback.start
     const since = Math.min(periodStart, now - 8 * DAY_MS)
     const daily = await getDailyUsage(env.DB, row.id, since)
-    const projection = computeProjectionFromDaily({
-      planLimit: row.plan_limit,
-      daily,
-      resetDay: row.reset_day,
-      now,
-    })
+
+    const limit = state?.available ?? row.plan_limit
+    const usedFromDaily = daily
+      .filter((d) => d.dayStart >= periodStart && d.dayStart <= now)
+      .reduce((s, d) => s + d.units, 0)
+    const used = state?.used ?? usedFromDaily
+
+    const projection = computeAccountProjection({ used, limit, periodStart, periodEnd, daily, now })
+    const weekUnits = daily
+      .filter((d) => d.dayStart >= now - 7 * DAY_MS)
+      .reduce((s, d) => s + d.units, 0)
     const usageResult: UsageResult = {
-      usedThisPeriod: projection.used,
-      weekUnits: usage.weekUnits,
+      usedThisPeriod: used,
+      weekUnits,
       periodStart,
-      fetchedAt: usage.fetchedAt,
+      fetchedAt: state?.updated_at ?? 0, // 0 => never synced yet
     }
     const sparkline = daily
       .filter((d) => d.dayStart >= periodStart)
       .map((d) => ({ capturedAt: d.dayStart, totalUnits: d.units }))
     return { token, usage: usageResult, projection, sparkline, status: 'ok' }
   } catch (err) {
-    const daily = await getDailyUsage(env.DB, row.id, periodStart)
-    return {
-      token,
-      usage: null,
-      projection: null,
-      sparkline: daily.map((d) => ({ capturedAt: d.dayStart, totalUnits: d.units })),
-      status: 'error',
-      error: (err as Error).message,
-    }
+    return { token, usage: null, projection: null, sparkline: [], status: 'error', error: (err as Error).message }
+  }
+}
+
+// Pull fresh usage from browserless into D1. Errors are returned, not thrown.
+async function refreshTokenUsage(
+  row: TokenRow,
+  env: Env,
+): Promise<{ id: string; ok: boolean; error?: string }> {
+  try {
+    const secrets = await decryptTokenSecrets(row, env.ENCRYPTION_KEY)
+    const usage = await fetchTokenUsage(rowToRecord(row), secrets)
+    await persistUsage(env.DB, row.id, usage)
+    return { id: row.id, ok: true }
+  } catch (err) {
+    return { id: row.id, ok: false, error: (err as Error).message }
   }
 }
 

@@ -175,3 +175,58 @@ export async function getDailyUsage(
     .all<{ day_start: number; units: number }>()
   return (results ?? []).map((r) => ({ dayStart: r.day_start, units: r.units }))
 }
+
+/** Most recent time any bucket for this token was refreshed (epoch ms), or null. */
+export async function getLastRefresh(db: D1Database, tokenId: string): Promise<number | null> {
+  const row = await db
+    .prepare('SELECT MAX(updated_at) AS t FROM daily_usage WHERE token_id = ?')
+    .bind(tokenId)
+    .first<{ t: number | null }>()
+  return row?.t ?? null
+}
+
+export interface AccountStateInput {
+  used: number | null
+  available: number | null
+  planName: string | null
+  periodEnd: number | null
+}
+
+export interface AccountStateRow {
+  used: number | null
+  available: number | null
+  plan_name: string | null
+  period_end: number | null
+  updated_at: number
+}
+
+export async function upsertAccountState(
+  db: D1Database,
+  tokenId: string,
+  s: AccountStateInput,
+  now: number,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO account_state (token_id, used, available, plan_name, period_end, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(token_id) DO UPDATE SET
+         used = excluded.used,
+         available = excluded.available,
+         plan_name = excluded.plan_name,
+         period_end = excluded.period_end,
+         updated_at = excluded.updated_at`,
+    )
+    .bind(tokenId, s.used, s.available, s.planName, s.periodEnd, now)
+    .run()
+}
+
+export async function getAccountState(
+  db: D1Database,
+  tokenId: string,
+): Promise<AccountStateRow | null> {
+  return db
+    .prepare('SELECT used, available, plan_name, period_end, updated_at FROM account_state WHERE token_id = ?')
+    .bind(tokenId)
+    .first<AccountStateRow>()
+}

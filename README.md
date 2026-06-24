@@ -23,8 +23,14 @@
 > 自架(self-hosted)fleet 改用 `GET {endpoint}/metrics/total`。
 
 注意:因為 API 只回最近一週,**第一個帳期可能少算**(加 token 之前 / 開始監控之前的日子拿不到);
-從第二個週期起就完整。方案額度上限(Free 1k / Starter 5k / Scale 25k)**不會**由 API 回傳,
+從第二個週期起就完整。方案額度上限(Free 1k / Starter 5k / Scale 25k)**不會**由 token-only 取得,
 所以每個 token 的每月 unit 額度需要**手動設定**。
+
+> **關於精確的本期總量:** 後台顯示的精確「已用量 / 上限 / 重置日」其實來自
+> `account(apiToken){ cloudUnits { used available } stripe { current_period_end } }`,但這個查詢
+> **需要瀏覽器登入的 Bearer(session token)**,不是 token-only。本專案預設走 token-only + 每日累積
+> (不需 Bearer、不會過期)。程式保留了選用 Bearer 的後端能力(`account_enc` 存加密的 Bearer、
+> `fetchCloudUsage(apiToken, authToken)`),預設停用。
 
 ## 可用天數估算
 
@@ -109,8 +115,16 @@ npm run build     # 正式建置 + 產生 PWA service worker
      PRIMARY KEY (token_id, day_start)
    );
    CREATE INDEX IF NOT EXISTS idx_daily_token_day ON daily_usage (token_id, day_start);
+   CREATE TABLE IF NOT EXISTS account_state (
+     token_id   TEXT PRIMARY KEY,
+     used       REAL,
+     available  REAL,
+     plan_name  TEXT,
+     period_end INTEGER,
+     updated_at INTEGER NOT NULL
+   );
    ```
-   應看到建立 `tokens`、`snapshots`、`daily_usage` 三張表成功。
+   應看到建立 `tokens`、`snapshots`、`daily_usage`、`account_state` 四張表成功。
    - 若回 `Requests without any query are not supported`(空查詢):把每個 statement 分開、一句一句 Execute。
    - 或改用 CLI(最保險):`wrangler login` 後執行
      `wrangler d1 migrations apply browserless-monitor --remote`(會套用 migrations/ 下所有檔案)。

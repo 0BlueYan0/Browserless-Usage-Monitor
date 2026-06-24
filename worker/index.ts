@@ -1,8 +1,8 @@
 // Scheduled Worker: periodically records each token's per-day usage buckets into
 // the shared D1 database so the monthly total survives the API's 7-day window and
 // the dashboard can compute a real burn rate.
-import { decryptTokenSecrets, fetchTokenUsage } from '../shared/usage'
-import { listTokenRows, rowToRecord, upsertDailyUsage } from '../shared/db'
+import { decryptTokenSecrets, fetchTokenUsage, persistUsage } from '../shared/usage'
+import { listTokenRows, rowToRecord } from '../shared/db'
 
 interface Env {
   DB: D1Database
@@ -34,10 +34,8 @@ async function runDailyUsage(env: Env): Promise<{ tokens: number; buckets: numbe
     try {
       const secrets = await decryptTokenSecrets(row, env.ENCRYPTION_KEY)
       const usage = await fetchTokenUsage(rowToRecord(row), secrets)
-      for (const b of usage.daily) {
-        await upsertDailyUsage(env.DB, row.id, b, usage.fetchedAt)
-        buckets++
-      }
+      await persistUsage(env.DB, row.id, usage)
+      buckets += usage.daily.length
       tokens++
     } catch (err) {
       console.error(`usage fetch failed for token ${row.id}:`, (err as Error).message)

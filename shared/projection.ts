@@ -137,6 +137,92 @@ export interface DailyPoint {
   units: number
 }
 
+/** Derive a period start by stepping one month back from a known period end. */
+export function periodStartFromEnd(periodEnd: number): number {
+  const d = new Date(periodEnd)
+  return Date.UTC(
+    d.getUTCFullYear(),
+    d.getUTCMonth() - 1,
+    d.getUTCDate(),
+    d.getUTCHours(),
+    d.getUTCMinutes(),
+    d.getUTCSeconds(),
+  )
+}
+
+export interface AccountProjectionInput {
+  /** Authoritative units used this period (from account.cloudUnits.used). */
+  used: number
+  /** Plan limit. */
+  limit: number
+  periodStart: number
+  periodEnd: number
+  /** Recent per-day buckets for the burn rate. */
+  daily: DailyPoint[]
+  now: number
+}
+
+/**
+ * Projection using the authoritative period total + limit + period end from
+ * account.cloudUnits, with the burn rate derived from recent daily buckets.
+ */
+export function computeAccountProjection(input: AccountProjectionInput): Projection {
+  const { used, limit, periodStart, periodEnd, daily, now } = input
+  const daysInPeriod = (periodEnd - periodStart) / DAY_MS
+  const daysElapsed = Math.max((now - periodStart) / DAY_MS, 0)
+  const todayStart = Math.floor(now / DAY_MS) * DAY_MS
+  const remaining = Math.max(limit - used, 0)
+  const percentUsed = limit > 0 ? (used / limit) * 100 : 0
+
+  const windowStart = todayStart - 7 * DAY_MS
+  const completeDays = daily.filter((d) => d.dayStart >= windowStart && d.dayStart < todayStart)
+
+  let dailyRate = 0
+  let method: ProjectionMethod = 'none'
+  if (completeDays.length > 0) {
+    dailyRate = completeDays.reduce((sum, d) => sum + d.units, 0) / completeDays.length
+    method = 'burn-rate'
+  } else if (used > 0 && daysElapsed > 0) {
+    dailyRate = used / Math.max(daysElapsed, 0.5)
+    method = 'linear'
+  }
+
+  const daysToPeriodEnd = Math.max((periodEnd - now) / DAY_MS, 0)
+  const projectedPeriodTotal = method === 'none' ? used : used + dailyRate * daysToPeriodEnd
+  const willExceed = projectedPeriodTotal > limit
+
+  let daysUntilExhausted: number | null = null
+  let exhaustionDate: number | null = null
+  if (remaining <= 0) {
+    daysUntilExhausted = 0
+    exhaustionDate = now
+  } else if (dailyRate > 0) {
+    const days = remaining / dailyRate
+    const exhaustAt = now + days * DAY_MS
+    if (exhaustAt < periodEnd) {
+      daysUntilExhausted = days
+      exhaustionDate = exhaustAt
+    }
+  }
+
+  return {
+    planLimit: limit,
+    used,
+    remaining,
+    percentUsed,
+    periodStart,
+    periodEnd,
+    daysInPeriod,
+    daysElapsed,
+    dailyRate,
+    projectedPeriodTotal,
+    willExceed,
+    daysUntilExhausted,
+    exhaustionDate,
+    method,
+  }
+}
+
 export interface DailyProjectionInput {
   planLimit: number
   daily: DailyPoint[]

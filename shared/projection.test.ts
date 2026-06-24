@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   burnRateFromSnapshots,
+  computeAccountProjection,
   computePeriod,
   computeProjection,
   computeProjectionFromDaily,
   normalizeResetDay,
+  periodStartFromEnd,
 } from './projection'
 
 const utc = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
@@ -200,5 +202,44 @@ describe('computeProjectionFromDaily', () => {
     // reset day 24 -> period starts June 24
     const p = computeProjectionFromDaily({ planLimit: 1000, daily, resetDay: 24, now: noon25 })
     expect(p.used).toBe(150)
+  })
+})
+
+describe('periodStartFromEnd', () => {
+  it('steps back one month', () => {
+    expect(periodStartFromEnd(Date.UTC(2026, 6, 5))).toBe(Date.UTC(2026, 5, 5))
+    expect(periodStartFromEnd(Date.UTC(2026, 0, 10))).toBe(Date.UTC(2025, 11, 10))
+  })
+})
+
+describe('computeAccountProjection', () => {
+  it('uses authoritative used/limit; burn rate from complete daily buckets', () => {
+    const now = Date.UTC(2026, 5, 25, 12)
+    const daily = [
+      { dayStart: utc(2026, 6, 18), units: 0 },
+      { dayStart: utc(2026, 6, 19), units: 39 },
+      { dayStart: utc(2026, 6, 20), units: 51 },
+      { dayStart: utc(2026, 6, 21), units: 19 },
+      { dayStart: utc(2026, 6, 22), units: 50 },
+      { dayStart: utc(2026, 6, 23), units: 137 },
+      { dayStart: utc(2026, 6, 24), units: 209 },
+      { dayStart: utc(2026, 6, 25), units: 376 }, // today (partial), excluded from rate
+    ]
+    const p = computeAccountProjection({
+      used: 975,
+      limit: 1000,
+      periodStart: utc(2026, 6, 1),
+      periodEnd: utc(2026, 7, 1),
+      daily,
+      now,
+    })
+    expect(p.used).toBe(975)
+    expect(p.planLimit).toBe(1000)
+    expect(p.remaining).toBe(25)
+    expect(p.percentUsed).toBeCloseTo(97.5, 1)
+    expect(p.method).toBe('burn-rate')
+    expect(p.dailyRate).toBeCloseTo(72.14, 1) // 505 over 7 complete days
+    expect(p.willExceed).toBe(true)
+    expect(p.daysUntilExhausted).toBeCloseTo(0.35, 1) // 25 / 72.14
   })
 })
