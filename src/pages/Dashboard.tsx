@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '../lib/api'
 import { fmtDays, fmtPct, fmtUnits, relTime } from '../lib/format'
 import { HEALTH_TEXT, healthFromPercent } from '../lib/plans'
@@ -7,61 +7,26 @@ import { UsageBar } from '../components/UsageBar'
 import { TokenCard } from '../components/TokenCard'
 import { StatTile } from '../components/StatTile'
 
-function RefreshIcon({ spinning }: { spinning: boolean }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={spinning ? 'animate-spin-slow' : ''}
-    >
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <path d="M21 3v6h-6" />
-    </svg>
-  )
-}
-
 export default function Dashboard() {
-  const qc = useQueryClient()
-  const { data, isLoading, isError, error, isFetching, dataUpdatedAt } = useQuery({
+  const { data, isLoading, isError, error, dataUpdatedAt } = useQuery({
     queryKey: ['usage'],
     queryFn: apiClient.usage,
     refetchInterval: 120_000,
   })
-  // Refresh pulls fresh data from browserless into D1, then re-reads the cache.
-  const refresh = useMutation({
-    mutationFn: apiClient.refresh,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
-  })
-  const syncing = refresh.isPending || isFetching
 
+  // No global refresh — each token card refreshes itself so a large token set
+  // never fans out a burst of browserless calls at once.
   const header = (
     <div className="mb-6 flex items-end justify-between gap-4">
       <div>
         <div className="label">Overview</div>
         <h1 className="mt-1 text-xl font-semibold text-fg">Usage across all tokens</h1>
       </div>
-      <div className="flex items-center gap-3">
-        {dataUpdatedAt > 0 && (
-          <span className="hidden font-mono text-[0.6rem] uppercase tracking-wider text-faint sm:inline">
-            synced {relTime(dataUpdatedAt)}
-          </span>
-        )}
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={() => refresh.mutate()}
-          disabled={syncing}
-        >
-          <RefreshIcon spinning={syncing} />
-          {syncing ? 'Syncing' : 'Refresh'}
-        </button>
-      </div>
+      {dataUpdatedAt > 0 && (
+        <span className="hidden font-mono text-[0.6rem] uppercase tracking-wider text-faint sm:inline">
+          synced {relTime(dataUpdatedAt)}
+        </span>
+      )}
     </div>
   )
 

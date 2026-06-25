@@ -1,9 +1,30 @@
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { TokenUsage } from '../../shared/types'
+import { apiClient } from '../lib/api'
 import { fmtDays, fmtPct, fmtRate, fmtUnits, daysUntil, relTime } from '../lib/format'
 import { HEALTH_TEXT, healthFromProjection, type Health } from '../lib/plans'
 import { UsageBar } from './UsageBar'
 import { Sparkline } from './Sparkline'
 import { StatusDot } from './StatusDot'
+
+function RefreshIcon({ spinning }: { spinning: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={spinning ? 'animate-spin-slow' : ''}
+    >
+      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  )
+}
 
 function MethodTag({ method }: { method: string }) {
   const text = method === 'burn-rate' ? 'burn-rate' : method === 'linear' ? 'linear' : 'no data'
@@ -25,6 +46,14 @@ function MiniStat({ label, value, accent }: { label: string; value: string; acce
 
 export function TokenCard({ data, index }: { data: TokenUsage; index: number }) {
   const { token, usage, projection, status } = data
+  const qc = useQueryClient()
+  // Independent per-token refresh: hits browserless for this token only, then
+  // re-reads the (cheap, D1-cached) usage query so this card updates in place.
+  const refresh = useMutation({
+    mutationFn: () => apiClient.refreshToken(token.id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['usage'] }),
+  })
+
   const health: Health = projection ? healthFromProjection(projection) : 'warn'
   const percent = projection ? projection.percentUsed : 0
   const projectedPercent =
@@ -47,11 +76,23 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
             <span className="font-mono text-[0.68rem] text-muted">{token.tokenMask}</span>
           </div>
         </div>
-        <div className="shrink-0 text-right">
-          <div className={`font-mono text-2xl tnum ${HEALTH_TEXT[health]}`}>
-            {projection ? fmtPct(percent) : '—'}
+        <div className="flex shrink-0 items-start gap-2">
+          <button
+            type="button"
+            onClick={() => refresh.mutate()}
+            disabled={refresh.isPending}
+            title="Refresh this token"
+            aria-label={`Refresh ${token.label}`}
+            className="grid h-8 w-8 place-items-center rounded-lg border border-line-strong text-muted transition hover:bg-[rgba(148,163,184,0.08)] hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <RefreshIcon spinning={refresh.isPending} />
+          </button>
+          <div className="text-right">
+            <div className={`font-mono text-2xl tnum ${HEALTH_TEXT[health]}`}>
+              {projection ? fmtPct(percent) : '—'}
+            </div>
+            <div className="label mt-0.5">used</div>
           </div>
-          <div className="label mt-0.5">used</div>
         </div>
       </div>
 
@@ -76,6 +117,11 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
       {usage && usage.fetchedAt === 0 && (
         <p className="mt-4 rounded-lg border border-line bg-[rgba(148,163,184,0.06)] px-3 py-2 text-xs text-muted">
           Awaiting first sync — hit Refresh.
+        </p>
+      )}
+      {refresh.isError && (
+        <p className="mt-4 rounded-lg border border-crit/30 bg-crit/10 px-3 py-2 text-xs text-crit">
+          Refresh failed: {(refresh.error as Error).message}
         </p>
       )}
 

@@ -52,5 +52,8 @@ export const apiClient = {
   testToken: (input: TokenInput) =>
     api<TestResult>('/api/tokens/test', { method: 'POST', body: JSON.stringify(input) }),
   usage: () => api<UsageResponse>('/api/usage'),
-  refresh: () => api<{ refreshed: number }>('/api/refresh', { method: 'POST' }),
+  // Refresh a single token only — per-token buttons avoid bursting browserless
+  // when many tokens are configured.
+  refreshToken: (id: string) =>
+    api<{ ok: true }>(`/api/refresh/${id}`, { method: 'POST' }),
 }

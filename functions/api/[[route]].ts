@@ -190,15 +190,16 @@ app.post('/api/tokens/test', async (c) => {
   }
 })
 
-// Refresh: pull fresh usage from browserless into D1 (manual button + on add).
-// Sequential to avoid bursting browserless's per-IP rate limit from Cloudflare.
-app.post('/api/refresh', async (c) => {
-  const rows = await listTokenRows(c.env.DB)
-  const results: Array<{ id: string; ok: boolean; error?: string }> = []
-  for (const row of rows) {
-    results.push(await refreshTokenUsage(row, c.env))
-  }
-  return c.json({ refreshed: results.filter((r) => r.ok).length, results })
+// Refresh a single token: pull fresh usage from browserless into D1. Each token
+// has its own dashboard button so refreshes never fan out across every token at
+// once (which would burst browserless's per-IP rate limit from Cloudflare).
+app.post('/api/refresh/:id', async (c) => {
+  const id = c.req.param('id')
+  const row = await getTokenRow(c.env.DB, id)
+  if (!row) return c.json({ error: 'not found' }, 404)
+  const result = await refreshTokenUsage(row, c.env)
+  if (!result.ok) return c.json({ error: result.error || 'refresh failed' }, 502)
+  return c.json({ ok: true })
 })
 
 // --- Usage overview (reads cached data from D1; no external calls) ---
