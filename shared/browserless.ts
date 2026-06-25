@@ -2,9 +2,11 @@
 //
 // Verified against the live API (2026-06), all token-only (no account login):
 //   - account(apiToken) { cloudUnits { used available name } stripe { current_period_end } }
-//       → authoritative billing-period units used, the plan limit, and the reset date.
+//       → the plan limit and the reset date. NOTE: cloudUnits.used only reflects the
+//         API's trailing ~week window, NOT the full billing period, so it must not be
+//         shown as the period total — see resolvePeriodUsed in projection.ts.
 //   - accountUsage(apiToken, timeframe: week) { aggregatedData { date units ... } }
-//       → recent per-day buckets, used for the burn-rate sparkline.
+//       → recent per-day buckets; banked in D1 and accumulated into the period total.
 // Both are fetched in one request. `timeframe` only accepts hour | day | week.
 import type { DailyBucket } from './types'
 
@@ -12,7 +14,7 @@ const GRAPHQL_ENDPOINT = 'https://api.browserless.io/graphql'
 const DAY_MS = 24 * 60 * 60 * 1000
 
 export interface AccountUsage {
-  /** Authoritative units used this billing period (cloudUnits.used). Null if unavailable. */
+  /** cloudUnits.used — trailing-window units, NOT the full period (see resolvePeriodUsed). Null if unavailable. */
   used: number | null
   /** Plan limit (cloudUnits.available). Null if unavailable. */
   limit: number | null

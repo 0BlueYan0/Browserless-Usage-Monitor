@@ -1,5 +1,5 @@
 // Pure billing-period + days-remaining math. No I/O, fully unit-testable.
-import type { Projection, ProjectionMethod, SnapshotPoint } from './types'
+import type { Projection, ProjectionMethod, SnapshotPoint, TokenSource } from './types'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -135,6 +135,38 @@ export function computeProjection(input: ProjectionInput): Projection {
 export interface DailyPoint {
   dayStart: number
   units: number
+}
+
+export interface PeriodUsedInput {
+  source: TokenSource
+  /** Live API figure: account.cloudUnits.used (cloud) or /metrics/total (self-hosted). null if unknown. */
+  stateUsed: number | null
+  /** Per-day buckets banked in D1 over the period. */
+  daily: DailyPoint[]
+  periodStart: number
+  now: number
+}
+
+/**
+ * Units used so far this billing period, reconciling the live API figure with the
+ * per-day buckets banked in D1.
+ *
+ * Cloud: account.cloudUnits.used only reflects the API's trailing ~week window, so
+ * it shrinks as old days roll off it. The cron banks each day's bucket (and merges
+ * the API's latest week into them), so summing the banked buckets across the whole
+ * period gives the real, monotonic period total — never the bare API figure.
+ *
+ * Self-hosted: /metrics/total is a cumulative aggregate, stored as one snapshot per
+ * day, so the banked buckets can't be summed without massively over-counting. Trust
+ * the latest aggregate, falling back to the buckets only if none was stored.
+ */
+export function resolvePeriodUsed(input: PeriodUsedInput): number {
+  const { source, stateUsed, daily, periodStart, now } = input
+  const fromDaily = daily
+    .filter((d) => d.dayStart >= periodStart && d.dayStart <= now)
+    .reduce((sum, d) => sum + d.units, 0)
+  if (source === 'self-hosted') return stateUsed ?? fromDaily
+  return fromDaily
 }
 
 /** Derive a period start by stepping one month back from a known period end. */

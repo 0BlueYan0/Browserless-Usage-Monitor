@@ -7,6 +7,7 @@ import {
   computeProjectionFromDaily,
   normalizeResetDay,
   periodStartFromEnd,
+  resolvePeriodUsed,
 } from './projection'
 
 const utc = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
@@ -202,6 +203,49 @@ describe('computeProjectionFromDaily', () => {
     // reset day 24 -> period starts June 24
     const p = computeProjectionFromDaily({ planLimit: 1000, daily, resetDay: 24, now: noon25 })
     expect(p.used).toBe(150)
+  })
+})
+
+describe('resolvePeriodUsed', () => {
+  const periodStart = utc(2026, 6, 1)
+  const now = Date.UTC(2026, 5, 25, 12) // June 25, 12:00 UTC
+  // Banked buckets: 200 (June 10) + 100 (June 24) + 40 (today) = 340 this period.
+  const daily = [
+    { dayStart: utc(2026, 6, 10), units: 200 },
+    { dayStart: utc(2026, 6, 24), units: 100 },
+    { dayStart: utc(2026, 6, 25), units: 40 },
+  ]
+
+  it('cloud: accumulates banked buckets, ignoring the week-only API figure', () => {
+    // The API only reports its trailing window (140), but the period really used 340.
+    expect(resolvePeriodUsed({ source: 'cloud', stateUsed: 140, daily, periodStart, now })).toBe(340)
+  })
+
+  it('cloud: never shrinks when the API figure drops as old days roll off the window', () => {
+    const high = resolvePeriodUsed({ source: 'cloud', stateUsed: 300, daily, periodStart, now })
+    const low = resolvePeriodUsed({ source: 'cloud', stateUsed: 50, daily, periodStart, now })
+    expect(high).toBe(340)
+    expect(low).toBe(340) // independent of the (shrinking) API figure
+  })
+
+  it('cloud: excludes buckets outside the billing period', () => {
+    const withPrior = [{ dayStart: utc(2026, 5, 28), units: 999 }, ...daily]
+    expect(
+      resolvePeriodUsed({ source: 'cloud', stateUsed: null, daily: withPrior, periodStart, now }),
+    ).toBe(340)
+  })
+
+  it('self-hosted: trusts the cumulative aggregate, not the (snapshot) buckets', () => {
+    // Self-hosted buckets are cumulative snapshots; summing them would over-count.
+    expect(resolvePeriodUsed({ source: 'self-hosted', stateUsed: 500, daily, periodStart, now })).toBe(
+      500,
+    )
+  })
+
+  it('self-hosted: falls back to banked buckets when no aggregate is stored', () => {
+    expect(
+      resolvePeriodUsed({ source: 'self-hosted', stateUsed: null, daily, periodStart, now }),
+    ).toBe(340)
   })
 })
 

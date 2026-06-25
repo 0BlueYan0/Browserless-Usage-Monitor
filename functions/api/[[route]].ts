@@ -3,11 +3,23 @@ import { Hono } from 'hono'
 import { handle } from 'hono/cloudflare-pages'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 
-import type { TokenInput, TokenPublic, TokenUsage, UsageResponse, UsageResult } from '../../shared/types'
+import type {
+  TokenInput,
+  TokenPublic,
+  TokenSource,
+  TokenUsage,
+  UsageResponse,
+  UsageResult,
+} from '../../shared/types'
 // (projection type is inferred from computeProjectionFromDaily)
 import { encryptSecret, decryptSecret } from '../../shared/crypto'
 import { createSessionToken, verifyPassword, verifySessionToken } from '../../shared/session'
-import { computeAccountProjection, computePeriod, periodStartFromEnd } from '../../shared/projection'
+import {
+  computeAccountProjection,
+  computePeriod,
+  periodStartFromEnd,
+  resolvePeriodUsed,
+} from '../../shared/projection'
 import { decryptTokenSecrets, fetchTokenUsage, persistUsage } from '../../shared/usage'
 import {
   type TokenRow,
@@ -257,10 +269,16 @@ async function readTokenUsage(row: TokenRow, env: Env, now: number): Promise<Tok
     const daily = await getDailyUsage(env.DB, row.id, since)
 
     const limit = state?.available ?? row.plan_limit
-    const usedFromDaily = daily
-      .filter((d) => d.dayStart >= periodStart && d.dayStart <= now)
-      .reduce((s, d) => s + d.units, 0)
-    const used = state?.used ?? usedFromDaily
+    // The browserless API's used figure only covers its trailing ~week window, so it
+    // shrinks as old days roll off. Accumulate the per-day buckets banked in D1 over
+    // the whole period instead (the API's latest week is already merged into them).
+    const used = resolvePeriodUsed({
+      source: row.source as TokenSource,
+      stateUsed: state?.used ?? null,
+      daily,
+      periodStart,
+      now,
+    })
 
     const projection = computeAccountProjection({ used, limit, periodStart, periodEnd, daily, now })
     const weekUnits = daily
