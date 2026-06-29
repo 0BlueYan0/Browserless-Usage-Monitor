@@ -362,8 +362,8 @@ function validateTokenInput(
   const planLimit = Number(body.planLimit)
   if (!Number.isFinite(planLimit) || planLimit <= 0) return { error: 'planLimit must be > 0' }
   const resetDay = Number(body.resetDay)
-  if (!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 28) {
-    return { error: 'resetDay must be an integer 1..28' }
+  if (!Number.isInteger(resetDay) || resetDay < 1 || resetDay > 31) {
+    return { error: 'resetDay must be an integer 1..31' }
   }
   if (opts.requireApiToken && (typeof body.apiToken !== 'string' || !body.apiToken.trim())) {
     return { error: 'apiToken is required' }

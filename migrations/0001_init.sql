@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS tokens (
   api_token_enc TEXT NOT NULL,                   -- AES-GCM ciphertext (iv|data, base64)
   account_enc   TEXT,                            -- optional {email,password} ciphertext (login fallback)
   plan_limit    INTEGER NOT NULL,                -- monthly unit allowance
-  reset_day     INTEGER NOT NULL DEFAULT 1,      -- billing-cycle reset day-of-month (1..28)
+  reset_day     INTEGER NOT NULL DEFAULT 1,      -- billing-cycle reset day-of-month (1..31; clamped to month length)
   sort_order    INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,                -- epoch ms
   updated_at    INTEGER NOT NULL                 -- epoch ms

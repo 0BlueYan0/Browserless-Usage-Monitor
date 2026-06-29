@@ -13,9 +13,10 @@ import {
 const utc = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
 
 describe('normalizeResetDay', () => {
-  it('clamps to 1..28', () => {
+  it('clamps to 1..31', () => {
     expect(normalizeResetDay(0)).toBe(1)
-    expect(normalizeResetDay(31)).toBe(28)
+    expect(normalizeResetDay(31)).toBe(31)
+    expect(normalizeResetDay(40)).toBe(31)
     expect(normalizeResetDay(15)).toBe(15)
     expect(normalizeResetDay(Number.NaN)).toBe(1)
   })
@@ -44,6 +45,39 @@ describe('computePeriod', () => {
     const { start, end } = computePeriod(10, utc(2026, 1, 5))
     expect(start).toBe(utc(2025, 12, 10))
     expect(end).toBe(utc(2026, 1, 10))
+  })
+
+  it('reset day 31 clamps the period end to the last day of a short month', () => {
+    // Jan 31 -> next reset is Feb 31, which does not exist; clamp to Feb 28 (2026 is not leap).
+    const { start, end } = computePeriod(31, utc(2026, 1, 31))
+    expect(start).toBe(utc(2026, 1, 31))
+    expect(end).toBe(utc(2026, 2, 28))
+  })
+
+  it('reset day 31 clamps the period start when now is in a short month', () => {
+    // In February, the reset lands on the 28th; before that, the period started Jan 31.
+    const { start, end } = computePeriod(31, utc(2026, 2, 15))
+    expect(start).toBe(utc(2026, 1, 31))
+    expect(end).toBe(utc(2026, 2, 28))
+  })
+
+  it('reset day 31: on the clamped reset day the new period has started', () => {
+    const { start, end } = computePeriod(31, utc(2026, 2, 28))
+    expect(start).toBe(utc(2026, 2, 28))
+    expect(end).toBe(utc(2026, 3, 31))
+  })
+
+  it('reset day 30 clamps into February', () => {
+    const { start, end } = computePeriod(30, utc(2026, 2, 10))
+    expect(start).toBe(utc(2026, 1, 30))
+    expect(end).toBe(utc(2026, 2, 28))
+  })
+
+  it('reset day 31 clamps to Feb 29 in a leap year', () => {
+    // 2028 is a leap year; February has 29 days.
+    const { start, end } = computePeriod(31, utc(2028, 2, 15))
+    expect(start).toBe(utc(2028, 1, 31))
+    expect(end).toBe(utc(2028, 2, 29))
   })
 })
 
@@ -253,6 +287,23 @@ describe('periodStartFromEnd', () => {
   it('steps back one month', () => {
     expect(periodStartFromEnd(Date.UTC(2026, 6, 5))).toBe(Date.UTC(2026, 5, 5))
     expect(periodStartFromEnd(Date.UTC(2026, 0, 10))).toBe(Date.UTC(2025, 11, 10))
+  })
+
+  it('clamps to the previous month length instead of overflowing', () => {
+    // Mar 31 -> Feb 31 does not exist; clamp to Feb 28 (2026 is not a leap year).
+    expect(periodStartFromEnd(Date.UTC(2026, 2, 31))).toBe(Date.UTC(2026, 1, 28))
+    // Mar 30 -> Feb 30 does not exist; clamp to Feb 28.
+    expect(periodStartFromEnd(Date.UTC(2026, 2, 30))).toBe(Date.UTC(2026, 1, 28))
+  })
+
+  it('clamps to Feb 29 stepping back from March in a leap year', () => {
+    expect(periodStartFromEnd(Date.UTC(2028, 2, 31))).toBe(Date.UTC(2028, 1, 29))
+  })
+
+  it('preserves the time-of-day while clamping the day', () => {
+    expect(periodStartFromEnd(Date.UTC(2026, 2, 31, 13, 45, 30))).toBe(
+      Date.UTC(2026, 1, 28, 13, 45, 30),
+    )
   })
 })
 

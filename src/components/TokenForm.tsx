@@ -153,7 +153,7 @@ export function TokenForm({
             className="field mt-1 font-mono tnum"
             type="number"
             min={1}
-            max={28}
+            max={31}
             value={resetDay}
             onChange={(e) => setResetDay(Number(e.target.value))}
           />

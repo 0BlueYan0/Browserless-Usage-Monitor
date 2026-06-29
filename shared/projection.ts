@@ -3,10 +3,24 @@ import type { Projection, ProjectionMethod, SnapshotPoint, TokenSource } from '.
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
-/** Clamp a reset day-of-month into a safe 1..28 range (avoids short-month gaps). */
+/** Clamp a reset day-of-month into the 1..31 range. */
 export function normalizeResetDay(resetDay: number): number {
   if (!Number.isFinite(resetDay)) return 1
-  return Math.min(Math.max(Math.trunc(resetDay), 1), 28)
+  return Math.min(Math.max(Math.trunc(resetDay), 1), 31)
+}
+
+/** Last day-of-month (1-based) for a given UTC year/month (0-based month). */
+function lastDayOfMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
+}
+
+/**
+ * Clamp a desired day-of-month to the given month's real length, so a reset day
+ * of 31 lands on Feb 28 (or 29), Apr 30, etc. instead of overflowing into the
+ * next month.
+ */
+function clampDayToMonth(year: number, month: number, day: number): number {
+  return Math.min(day, lastDayOfMonth(year, month))
 }
 
 /**
@@ -17,23 +31,25 @@ export function normalizeResetDay(resetDay: number): number {
 export function computePeriod(resetDay: number, now: number): { start: number; end: number } {
   const day = normalizeResetDay(resetDay)
   const d = new Date(now)
-  let year = d.getUTCFullYear()
-  let month = d.getUTCMonth()
-  if (d.getUTCDate() < day) {
-    month -= 1
-    if (month < 0) {
-      month = 11
-      year -= 1
+  let startYear = d.getUTCFullYear()
+  let startMonth = d.getUTCMonth()
+  // The reset lands on the clamped day for the current month; before it, the
+  // active period started in the previous month.
+  if (d.getUTCDate() < clampDayToMonth(startYear, startMonth, day)) {
+    startMonth -= 1
+    if (startMonth < 0) {
+      startMonth = 11
+      startYear -= 1
     }
   }
-  const start = Date.UTC(year, month, day)
-  let endYear = year
-  let endMonth = month + 1
+  const start = Date.UTC(startYear, startMonth, clampDayToMonth(startYear, startMonth, day))
+  let endYear = startYear
+  let endMonth = startMonth + 1
   if (endMonth > 11) {
     endMonth = 0
     endYear += 1
   }
-  const end = Date.UTC(endYear, endMonth, day)
+  const end = Date.UTC(endYear, endMonth, clampDayToMonth(endYear, endMonth, day))
   return { start, end }
 }
 
@@ -169,17 +185,21 @@ export function resolvePeriodUsed(input: PeriodUsedInput): number {
   return fromDaily
 }
 
-/** Derive a period start by stepping one month back from a known period end. */
+/**
+ * Derive a period start by stepping one month back from a known period end,
+ * clamping the day to the previous month's length so a month-end (e.g. the 31st)
+ * does not overflow into the wrong month.
+ */
 export function periodStartFromEnd(periodEnd: number): number {
   const d = new Date(periodEnd)
-  return Date.UTC(
-    d.getUTCFullYear(),
-    d.getUTCMonth() - 1,
-    d.getUTCDate(),
-    d.getUTCHours(),
-    d.getUTCMinutes(),
-    d.getUTCSeconds(),
-  )
+  let year = d.getUTCFullYear()
+  let month = d.getUTCMonth() - 1
+  if (month < 0) {
+    month = 11
+    year -= 1
+  }
+  const day = clampDayToMonth(year, month, d.getUTCDate())
+  return Date.UTC(year, month, day, d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds())
 }
 
 export interface AccountProjectionInput {
