@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  billedUnits,
   burnRateFromSnapshots,
   computeAccountProjection,
   computePeriod,
@@ -11,6 +12,18 @@ import {
 } from './projection'
 
 const utc = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
+
+describe('billedUnits', () => {
+  it('sums base units, proxy units, and captcha units', () => {
+    // The bug case: dashboard showed 45 (base only); real billed 45 + 817 + 220 = 1082.
+    expect(billedUnits({ units: 45, proxy: 817, captcha: 220 })).toBe(1082)
+  })
+
+  it('treats missing proxy/captcha as zero', () => {
+    expect(billedUnits({ units: 45 })).toBe(45)
+    expect(billedUnits({ units: 10, proxy: 5 })).toBe(15)
+  })
+})
 
 describe('normalizeResetDay', () => {
   it('clamps to 1..31', () => {
@@ -269,6 +282,15 @@ describe('resolvePeriodUsed', () => {
     ).toBe(340)
   })
 
+  it('cloud: bills base units PLUS proxy and captcha units', () => {
+    // Regression: browserless charges the quota for base compute + proxy + captcha.
+    // A single day of base 45 + proxy 817 + captcha 220 must resolve to 1082, not 45.
+    const withExtras = [{ dayStart: utc(2026, 6, 24), units: 45, proxy: 817, captcha: 220 }]
+    expect(
+      resolvePeriodUsed({ source: 'cloud', stateUsed: null, daily: withExtras, periodStart, now }),
+    ).toBe(1082)
+  })
+
   it('self-hosted: trusts the cumulative aggregate, not the (snapshot) buckets', () => {
     // Self-hosted buckets are cumulative snapshots; summing them would over-count.
     expect(resolvePeriodUsed({ source: 'self-hosted', stateUsed: 500, daily, periodStart, now })).toBe(
@@ -336,5 +358,24 @@ describe('computeAccountProjection', () => {
     expect(p.dailyRate).toBeCloseTo(72.14, 1) // 505 over 7 complete days
     expect(p.willExceed).toBe(true)
     expect(p.daysUntilExhausted).toBeCloseTo(0.35, 1) // 25 / 72.14
+  })
+
+  it('folds proxy + captcha units into the burn rate', () => {
+    const now = Date.UTC(2026, 5, 25, 12)
+    // Two complete days, each billing base 10 + proxy 20 + captcha 30 = 60/day.
+    const daily = [
+      { dayStart: utc(2026, 6, 23), units: 10, proxy: 20, captcha: 30 },
+      { dayStart: utc(2026, 6, 24), units: 10, proxy: 20, captcha: 30 },
+      { dayStart: utc(2026, 6, 25), units: 5, proxy: 0, captcha: 0 }, // today, excluded from rate
+    ]
+    const p = computeAccountProjection({
+      used: 125,
+      limit: 1000,
+      periodStart: utc(2026, 6, 1),
+      periodEnd: utc(2026, 7, 1),
+      daily,
+      now,
+    })
+    expect(p.dailyRate).toBe(60) // (60 + 60) / 2 complete days, not (10 + 10) / 2
   })
 })

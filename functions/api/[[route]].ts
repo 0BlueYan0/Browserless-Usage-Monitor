@@ -15,6 +15,7 @@ import type {
 import { encryptSecret, decryptSecret } from '../../shared/crypto'
 import { createSessionToken, verifyPassword, verifySessionToken } from '../../shared/session'
 import {
+  billedUnits,
   computeAccountProjection,
   computePeriod,
   periodStartFromEnd,
@@ -283,7 +284,7 @@ async function readTokenUsage(row: TokenRow, env: Env, now: number): Promise<Tok
     const projection = computeAccountProjection({ used, limit, periodStart, periodEnd, daily, now })
     const weekUnits = daily
       .filter((d) => d.dayStart >= now - 7 * DAY_MS)
-      .reduce((s, d) => s + d.units, 0)
+      .reduce((s, d) => s + billedUnits(d), 0)
     const usageResult: UsageResult = {
       usedThisPeriod: used,
       weekUnits,
@@ -292,7 +293,7 @@ async function readTokenUsage(row: TokenRow, env: Env, now: number): Promise<Tok
     }
     const sparkline = daily
       .filter((d) => d.dayStart >= periodStart)
-      .map((d) => ({ capturedAt: d.dayStart, totalUnits: d.units }))
+      .map((d) => ({ capturedAt: d.dayStart, totalUnits: billedUnits(d) }))
     return { token, usage: usageResult, projection, sparkline, status: 'ok' }
   } catch (err) {
     return { token, usage: null, projection: null, sparkline: [], status: 'error', error: (err as Error).message }

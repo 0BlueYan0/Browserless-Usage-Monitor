@@ -166,14 +166,21 @@ export async function getDailyUsage(
   db: D1Database,
   tokenId: string,
   sinceMs: number,
-): Promise<Array<{ dayStart: number; units: number }>> {
+): Promise<Array<{ dayStart: number; units: number; proxy: number; captcha: number }>> {
+  // proxy + captcha are billed on top of base units — carry them so the caller
+  // (billedUnits) can sum the true quota draw. See projection.ts:billedUnits.
   const { results } = await db
     .prepare(
-      'SELECT day_start, units FROM daily_usage WHERE token_id = ? AND day_start >= ? ORDER BY day_start',
+      'SELECT day_start, units, proxy, captcha FROM daily_usage WHERE token_id = ? AND day_start >= ? ORDER BY day_start',
     )
     .bind(tokenId, sinceMs)
-    .all<{ day_start: number; units: number }>()
-  return (results ?? []).map((r) => ({ dayStart: r.day_start, units: r.units }))
+    .all<{ day_start: number; units: number; proxy: number; captcha: number }>()
+  return (results ?? []).map((r) => ({
+    dayStart: r.day_start,
+    units: r.units,
+    proxy: r.proxy,
+    captcha: r.captcha,
+  }))
 }
 
 /** Most recent time any bucket for this token was refreshed (epoch ms), or null. */

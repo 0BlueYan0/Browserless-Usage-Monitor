@@ -9,6 +9,7 @@
 //       → recent per-day buckets; banked in D1 and accumulated into the period total.
 // Both are fetched in one request. `timeframe` only accepts hour | day | week.
 import type { DailyBucket } from './types'
+import { billedUnits } from './projection'
 
 const GRAPHQL_ENDPOINT = 'https://api.browserless.io/graphql'
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -152,7 +153,7 @@ export async function fetchCloudUsage(apiToken: string, authToken?: string): Pro
     planName,
     periodEnd,
     daily,
-    weekUnits: daily.reduce((s, b) => s + b.units, 0),
+    weekUnits: daily.reduce((s, b) => s + billedUnits(b), 0),
     fetchedAt: Date.now(),
   }
 }

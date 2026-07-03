@@ -150,7 +150,22 @@ export function computeProjection(input: ProjectionInput): Projection {
 
 export interface DailyPoint {
   dayStart: number
+  /** Base compute units (the API's `units` field). */
   units: number
+  /** Residential-proxy units, billed on top of base. Absent = 0. */
+  proxy?: number
+  /** CAPTCHA-solve units, billed on top of base. Absent = 0. */
+  captcha?: number
+}
+
+/**
+ * Total units a day consumes from the plan quota. Browserless bills base compute
+ * (`units`) PLUS residential-proxy units and CAPTCHA-solve units as separate line
+ * items, and the quota is drawn down by their sum. Summing `units` alone silently
+ * under-counts usage (e.g. base 45 + proxy 817 + captcha 220 = 1082, not 45).
+ */
+export function billedUnits(d: { units: number; proxy?: number; captcha?: number }): number {
+  return d.units + (d.proxy ?? 0) + (d.captcha ?? 0)
 }
 
 export interface PeriodUsedInput {
@@ -180,7 +195,7 @@ export function resolvePeriodUsed(input: PeriodUsedInput): number {
   const { source, stateUsed, daily, periodStart, now } = input
   const fromDaily = daily
     .filter((d) => d.dayStart >= periodStart && d.dayStart <= now)
-    .reduce((sum, d) => sum + d.units, 0)
+    .reduce((sum, d) => sum + billedUnits(d), 0)
   if (source === 'self-hosted') return stateUsed ?? fromDaily
   return fromDaily
 }
@@ -232,7 +247,7 @@ export function computeAccountProjection(input: AccountProjectionInput): Project
   let dailyRate = 0
   let method: ProjectionMethod = 'none'
   if (completeDays.length > 0) {
-    dailyRate = completeDays.reduce((sum, d) => sum + d.units, 0) / completeDays.length
+    dailyRate = completeDays.reduce((sum, d) => sum + billedUnits(d), 0) / completeDays.length
     method = 'burn-rate'
   } else if (used > 0 && daysElapsed > 0) {
     dailyRate = used / Math.max(daysElapsed, 0.5)
@@ -297,7 +312,7 @@ export function computeProjectionFromDaily(input: DailyProjectionInput): Project
 
   const used = daily
     .filter((d) => d.dayStart >= periodStart && d.dayStart <= now)
-    .reduce((sum, d) => sum + d.units, 0)
+    .reduce((sum, d) => sum + billedUnits(d), 0)
   const remaining = Math.max(planLimit - used, 0)
   const percentUsed = planLimit > 0 ? (used / planLimit) * 100 : 0
 
@@ -307,7 +322,7 @@ export function computeProjectionFromDaily(input: DailyProjectionInput): Project
   let dailyRate = 0
   let method: ProjectionMethod = 'none'
   if (completeDays.length > 0) {
-    dailyRate = completeDays.reduce((sum, d) => sum + d.units, 0) / completeDays.length
+    dailyRate = completeDays.reduce((sum, d) => sum + billedUnits(d), 0) / completeDays.length
     method = 'burn-rate'
   } else if (used > 0) {
     dailyRate = used / Math.max(daysElapsed, 0.5)
