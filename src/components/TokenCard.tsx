@@ -74,6 +74,7 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
               {token.source === 'cloud' ? 'CLOUD' : 'SELF-HOSTED'}
             </span>
             <span className="font-mono text-[0.68rem] text-muted">{token.tokenMask}</span>
+            <span className="font-mono text-[0.68rem] text-muted">· resets day {token.resetDay}</span>
           </div>
         </div>
         <div className="flex shrink-0 items-start gap-2">
