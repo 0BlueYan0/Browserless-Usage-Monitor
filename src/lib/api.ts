@@ -49,6 +49,8 @@ export const apiClient = {
   updateToken: (id: string, input: TokenInput) =>
     api<{ token: TokenPublic }>(`/api/tokens/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
   deleteToken: (id: string) => api<{ ok: true }>(`/api/tokens/${id}`, { method: 'DELETE' }),
+  reorderTokens: (ids: string[]) =>
+    api<{ ok: true }>('/api/tokens/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   testToken: (input: TokenInput) =>
     api<TestResult>('/api/tokens/test', { method: 'POST', body: JSON.stringify(input) }),
   usage: () => api<UsageResponse>('/api/usage'),

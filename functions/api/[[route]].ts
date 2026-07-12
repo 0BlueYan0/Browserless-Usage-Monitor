@@ -177,6 +177,25 @@ app.delete('/api/tokens/:id', async (c) => {
   return c.json({ ok: true })
 })
 
+// Persist a user-defined display order: body.ids is the full token id list in
+// the desired order; sort_order becomes the array index.
+app.post('/api/tokens/reorder', async (c) => {
+  const body = await readJson<{ ids?: unknown }>(c)
+  const ids = Array.isArray(body?.ids)
+    ? body!.ids.filter((x): x is string => typeof x === 'string')
+    : []
+  const rows = await listTokenRows(c.env.DB)
+  const known = new Set(rows.map((r) => r.id))
+  const unique = new Set(ids)
+  if (ids.length !== known.size || unique.size !== ids.length || !ids.every((id) => known.has(id))) {
+    return c.json({ error: 'ids must contain every token id exactly once' }, 400)
+  }
+  const now = Date.now()
+  const stmt = c.env.DB.prepare('UPDATE tokens SET sort_order = ?, updated_at = ? WHERE id = ?')
+  await c.env.DB.batch(ids.map((id, i) => stmt.bind(i, now, id)))
+  return c.json({ ok: true })
+})
+
 // Test a token's connection without saving it.
 app.post('/api/tokens/test', async (c) => {
   const body = await readJson<TokenInput>(c)

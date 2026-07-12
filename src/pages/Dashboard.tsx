@@ -54,8 +54,8 @@ export default function Dashboard() {
     )
   }
 
-  // Display order: by billing reset day; stable sort keeps API order (sort_order) for ties.
-  const tokens = [...(data?.tokens ?? [])].sort((a, b) => a.token.resetDay - b.token.resetDay)
+  // Display order: user-defined sort_order (adjust via ↑↓ in Settings → Tokens).
+  const tokens = data?.tokens ?? []
   const agg = data?.aggregate
 
   if (tokens.length === 0) {
