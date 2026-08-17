@@ -11,8 +11,12 @@ export default function Login() {
 
   const login = useMutation({
     mutationFn: () => apiClient.login(password),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ['me'] })
+    onSuccess: () => {
+      // Write the auth state synchronously: invalidateQueries only refetches
+      // *active* queries, and ['me'] has no observer while on /login — so the
+      // stale {authenticated:false} would bounce RequireAuth back here once,
+      // forcing a second login.
+      qc.setQueryData(['me'], { authenticated: true })
       navigate('/dashboard', { replace: true })
     },
   })
