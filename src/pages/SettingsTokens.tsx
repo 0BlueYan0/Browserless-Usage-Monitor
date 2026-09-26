@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TokenInput, TokenPublic } from '../../shared/types'
+import { computePeriod } from '../../shared/projection'
 import { apiClient } from '../lib/api'
 import { fmtUnits } from '../lib/format'
 import { TokenForm } from '../components/TokenForm'
@@ -45,20 +46,11 @@ export default function SettingsTokens() {
     mutationFn: (id: string) => apiClient.deleteToken(id),
     onSuccess: invalidate,
   })
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) => apiClient.reorderTokens(ids),
-    onSuccess: invalidate,
-  })
-
-  const tokens = data?.tokens ?? []
-
-  const move = (index: number, dir: -1 | 1) => {
-    const target = index + dir
-    if (target < 0 || target >= tokens.length) return
-    const ids = tokens.map((t) => t.id)
-    ;[ids[index], ids[target]] = [ids[target], ids[index]]
-    reorder.mutate(ids)
-  }
+  // Same order as the dashboard: soonest upcoming reset first, ties keep sort_order.
+  const now = Date.now()
+  const tokens = [...(data?.tokens ?? [])].sort(
+    (a, b) => computePeriod(a.resetDay, now).end - computePeriod(b.resetDay, now).end,
+  )
   const submitting = create.isPending || update.isPending
 
   return (
@@ -102,7 +94,7 @@ export default function SettingsTokens() {
         <div className="panel p-10 text-center text-muted">No tokens configured yet.</div>
       ) : (
         <div className="space-y-2">
-          {tokens.map((t, i) => (
+          {tokens.map((t) => (
             <div
               key={t.id}
               className="panel flex flex-wrap items-center justify-between gap-3 px-4 py-3"
@@ -124,24 +116,6 @@ export default function SettingsTokens() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <button
-                  type="button"
-                  className="btn btn-ghost px-2"
-                  disabled={i === 0 || reorder.isPending}
-                  aria-label={`Move ${t.label} up`}
-                  onClick={() => move(i, -1)}
-                >
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost px-2"
-                  disabled={i === tokens.length - 1 || reorder.isPending}
-                  aria-label={`Move ${t.label} down`}
-                  onClick={() => move(i, 1)}
-                >
-                  ↓
-                </button>
                 <button
                   type="button"
                   className="btn btn-ghost"

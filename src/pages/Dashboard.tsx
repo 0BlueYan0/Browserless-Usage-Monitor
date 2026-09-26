@@ -1,5 +1,7 @@
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import type { TokenUsage } from '../../shared/types'
+import { computePeriod } from '../../shared/projection'
 import { apiClient } from '../lib/api'
 import { fmtDays, fmtPct, fmtUnits, relTime } from '../lib/format'
 import { HEALTH_TEXT, healthFromPercent } from '../lib/plans'
@@ -54,8 +56,13 @@ export default function Dashboard() {
     )
   }
 
-  // Display order: user-defined sort_order (adjust via ↑↓ in Settings → Tokens).
-  const tokens = data?.tokens ?? []
+  // Display order: soonest upcoming reset first. periodEnd (browserless-reported
+  // for cloud tokens) keeps the order consistent with each card's "Resets in";
+  // stable sort keeps API order (sort_order) for ties.
+  const now = Date.now()
+  const nextReset = (t: TokenUsage) =>
+    t.projection?.periodEnd ?? computePeriod(t.token.resetDay, now).end
+  const tokens = [...(data?.tokens ?? [])].sort((a, b) => nextReset(a) - nextReset(b))
   const agg = data?.aggregate
 
   if (tokens.length === 0) {
