@@ -27,6 +27,8 @@ export interface AccountUsage {
   daily: DailyBucket[]
   /** Total units over the trailing week (sum of daily). */
   weekUnits: number
+  /** true = endpoint rejected the token for the usage limit, false = accepted, null = unknown. */
+  exhausted: boolean | null
   fetchedAt: number
 }
 
@@ -107,6 +109,23 @@ async function gql<T>(query: string, variables: object, authToken?: string): Pro
   throw lastError
 }
 
+// accountUsage can report 0 units for a token that is already out of quota
+// (seen 2026-10: maxConcurrent > 0, rejected > 0, units 0). The endpoints answer
+// such a token with 401 + this message. /meta starts no browser, so it bills no units.
+const PROBE_URL = 'https://production-sfo.browserless.io/meta'
+
+/** Ask a browserless endpoint whether the token is out of quota. null = could not tell. */
+export async function probeQuotaExhausted(apiToken: string): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${PROBE_URL}?token=${encodeURIComponent(apiToken)}`)
+    if (res.ok) return false
+    if (res.status === 401 && /usage limit/i.test(await res.text())) return true
+    return null
+  } catch {
+    return null
+  }
+}
+
 function toBucket(r: AggRow): DailyBucket {
   return {
     // The API timestamps each daily bucket at the day's *end* (next UTC midnight),
@@ -147,6 +166,8 @@ export async function fetchCloudUsage(apiToken: string, authToken?: string): Pro
     }
   }
 
+  const exhausted = await probeQuotaExhausted(apiToken)
+
   return {
     used,
     limit,
@@ -154,6 +175,7 @@ export async function fetchCloudUsage(apiToken: string, authToken?: string): Pro
     periodEnd,
     daily,
     weekUnits: daily.reduce((s, b) => s + billedUnits(b), 0),
+    exhausted,
     fetchedAt: Date.now(),
   }
 }
@@ -174,6 +196,7 @@ export async function fetchSelfHostedUsage(endpoint: string, token: string): Pro
     periodEnd: null,
     daily: [{ dayStart: today, units, successful: 0, proxy: 0, captcha: 0, seconds: 0 }],
     weekUnits: units,
+    exhausted: null,
     fetchedAt: Date.now(),
   }
 }

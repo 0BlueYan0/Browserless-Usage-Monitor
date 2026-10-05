@@ -15,6 +15,7 @@ import type {
 import { encryptSecret, decryptSecret } from '../../shared/crypto'
 import { createSessionToken, verifyPassword, verifySessionToken } from '../../shared/session'
 import {
+  applyExhausted,
   billedUnits,
   computeAccountProjection,
   computePeriod,
@@ -292,13 +293,18 @@ async function readTokenUsage(row: TokenRow, env: Env, now: number): Promise<Tok
     // The browserless API's used figure only covers its trailing ~week window, so it
     // shrinks as old days roll off. Accumulate the per-day buckets banked in D1 over
     // the whole period instead (the API's latest week is already merged into them).
-    const used = resolvePeriodUsed({
+    const summed = resolvePeriodUsed({
       source: row.source as TokenSource,
       stateUsed: state?.used ?? null,
       daily,
       periodStart,
       now,
     })
+    // accountUsage can report 0 units for a token that endpoints already reject
+    // for the usage limit; that rejection is the authoritative signal.
+    const exhaustedAt = state?.exhausted_at ?? null
+    const used = applyExhausted(summed, limit, exhaustedAt, periodStart)
+    const exhausted = exhaustedAt != null && exhaustedAt >= periodStart
 
     const projection = computeAccountProjection({ used, limit, periodStart, periodEnd, daily, now })
     const weekUnits = daily
@@ -309,6 +315,7 @@ async function readTokenUsage(row: TokenRow, env: Env, now: number): Promise<Tok
       weekUnits,
       periodStart,
       fetchedAt: state?.updated_at ?? 0, // 0 => never synced yet
+      exhausted,
     }
     const sparkline = daily
       .filter((d) => d.dayStart >= periodStart)

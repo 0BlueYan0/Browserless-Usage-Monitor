@@ -197,6 +197,8 @@ export interface AccountStateInput {
   available: number | null
   planName: string | null
   periodEnd: number | null
+  /** true = rejected for the usage limit, false = accepted, null = unknown (keep the stored value). */
+  exhausted: boolean | null
 }
 
 export interface AccountStateRow {
@@ -204,6 +206,7 @@ export interface AccountStateRow {
   available: number | null
   plan_name: string | null
   period_end: number | null
+  exhausted_at: number | null
   updated_at: number
 }
 
@@ -215,16 +218,27 @@ export async function upsertAccountState(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO account_state (token_id, used, available, plan_name, period_end, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO account_state (token_id, used, available, plan_name, period_end, exhausted_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(token_id) DO UPDATE SET
          used = excluded.used,
          available = excluded.available,
          plan_name = excluded.plan_name,
          period_end = excluded.period_end,
+         exhausted_at = CASE WHEN ? THEN account_state.exhausted_at ELSE excluded.exhausted_at END,
          updated_at = excluded.updated_at`,
     )
-    .bind(tokenId, s.used, s.available, s.planName, s.periodEnd, now)
+    .bind(
+      tokenId,
+      s.used,
+      s.available,
+      s.planName,
+      s.periodEnd,
+      s.exhausted ? now : null,
+      now,
+      // CASE flag: 1 = probe was inconclusive, keep the stored exhausted_at.
+      s.exhausted === null ? 1 : 0,
+    )
     .run()
 }
 
@@ -233,7 +247,7 @@ export async function getAccountState(
   tokenId: string,
 ): Promise<AccountStateRow | null> {
   return db
-    .prepare('SELECT used, available, plan_name, period_end, updated_at FROM account_state WHERE token_id = ?')
+    .prepare('SELECT used, available, plan_name, period_end, exhausted_at, updated_at FROM account_state WHERE token_id = ?')
     .bind(tokenId)
     .first<AccountStateRow>()
 }

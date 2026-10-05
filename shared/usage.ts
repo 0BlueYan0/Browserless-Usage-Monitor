@@ -20,7 +20,7 @@ export async function persistUsage(
   await upsertAccountState(
     db,
     tokenId,
-    { used: usage.used, available: usage.limit, planName: usage.planName, periodEnd: usage.periodEnd },
+    { used: usage.used, available: usage.limit, planName: usage.planName, periodEnd: usage.periodEnd, exhausted: usage.exhausted },
     usage.fetchedAt,
   )
   for (const b of usage.daily) {

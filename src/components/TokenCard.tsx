@@ -105,6 +105,11 @@ export function TokenCard({ data, index }: { data: TokenUsage; index: number }) 
         </div>
       </div>
 
+      {usage?.exhausted && (
+        <p className="mt-4 rounded-lg border border-crit/30 bg-crit/10 px-3 py-2 text-xs text-crit">
+          Quota exhausted: browserless rejects this token for the usage limit. Its usage stats under-report, so used is shown as the plan limit.
+        </p>
+      )}
       {status === 'needs-login' && (
         <p className="mt-4 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
           Token-only usage query failed. Add account login for this token in its settings.

@@ -201,6 +201,22 @@ export function resolvePeriodUsed(input: PeriodUsedInput): number {
 }
 
 /**
+ * Units used this period once browserless's own exhaustion signal is applied.
+ * accountUsage can report 0 units for a token whose endpoints already answer 401
+ * "units usage limit", so an exhaustion seen this period pins used to the limit.
+ * An exhaustion recorded before periodStart belongs to the previous period.
+ */
+export function applyExhausted(
+  used: number,
+  limit: number,
+  exhaustedAt: number | null,
+  periodStart: number,
+): number {
+  if (exhaustedAt == null || exhaustedAt < periodStart) return used
+  return Math.max(used, limit)
+}
+
+/**
  * Derive a period start by stepping one month back from a known period end,
  * clamping the day to the previous month's length so a month-end (e.g. the 31st)
  * does not overflow into the wrong month.

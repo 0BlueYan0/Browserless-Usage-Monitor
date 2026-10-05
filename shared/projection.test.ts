@@ -9,6 +9,7 @@ import {
   normalizeResetDay,
   periodStartFromEnd,
   resolvePeriodUsed,
+  applyExhausted,
 } from './projection'
 
 const utc = (y: number, m: number, d: number) => Date.UTC(y, m - 1, d)
@@ -377,5 +378,26 @@ describe('computeAccountProjection', () => {
       now,
     })
     expect(p.dailyRate).toBe(60) // (60 + 60) / 2 complete days, not (10 + 10) / 2
+  })
+})
+
+describe('applyExhausted', () => {
+  const periodStart = utc(2026, 9, 26)
+
+  it('raises used to the limit when browserless reported exhaustion this period', () => {
+    // accountUsage reported 0 units for a token whose endpoints answer 401 "units usage limit".
+    expect(applyExhausted(0, 1000, utc(2026, 10, 5), periodStart)).toBe(1000)
+  })
+
+  it('ignores an exhaustion observed before the current period started', () => {
+    expect(applyExhausted(12, 1000, utc(2026, 9, 20), periodStart)).toBe(12)
+  })
+
+  it('keeps used when there is no exhaustion record', () => {
+    expect(applyExhausted(300, 1000, null, periodStart)).toBe(300)
+  })
+
+  it('never lowers a used figure that already exceeds the limit', () => {
+    expect(applyExhausted(1082, 1000, utc(2026, 10, 5), periodStart)).toBe(1082)
   })
 })

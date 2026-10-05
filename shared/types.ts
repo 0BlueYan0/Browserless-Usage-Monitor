@@ -39,6 +39,8 @@ export interface UsageResult {
   weekUnits: number
   periodStart: number
   fetchedAt: number
+  /** browserless rejected the token for the usage limit this period; used is pinned to the limit. */
+  exhausted: boolean
 }
 
 export type ProjectionMethod = 'linear' | 'burn-rate' | 'none'
